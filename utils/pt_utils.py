@@ -1,5 +1,6 @@
 import torch
-
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -62,3 +63,49 @@ def plot_grad_flow(named_parameters):
     plt.draw()
     plt.pause(0.001)
     return 0
+
+def conv2d_same_padding(input, weight, bias=None, stride=(1,1), padding=(1,1), dilation=(1,1), groups=1):
+
+    input_rows = input.size(2)
+    filter_rows = weight.size(2)
+    effective_filter_size_rows = (filter_rows - 1) * dilation[0] + 1
+    out_rows = (input_rows + stride[0] - 1) // stride[0]
+    padding_needed = max(0, (out_rows - 1) * stride[0] + effective_filter_size_rows -
+                  input_rows)
+    padding_rows = max(0, (out_rows - 1) * stride[0] +
+                        (filter_rows - 1) * dilation[0] + 1 - input_rows)
+    rows_odd = (padding_rows % 2 != 0)
+    padding_cols = max(0, (out_rows - 1) * stride[0] +
+                        (filter_rows - 1) * dilation[0] + 1 - input_rows)
+    cols_odd = (padding_rows % 2 != 0)
+
+    if rows_odd or cols_odd:
+        input = pad(input, [0, int(cols_odd), 0, int(rows_odd)])
+
+    return F.conv2d(input, weight, bias, stride,
+                  padding=(padding_rows // 2, padding_cols // 2),
+                  dilation=dilation, groups=groups)
+
+class Conv2dSamePadding(torch.nn.Conv2d):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros'):
+        super(Conv2dSamePadding, self).__init__(in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, groups, bias, padding_mode)
+
+    def forward(self, input):
+        return conv2d_same_padding(input, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+
+def get_nl(name, fun=False, **kwargs):
+    if hasattr(F, name) and fun:
+        return getattr(F, name)
+    elif hasattr(nn, name):
+        return getattr(nn, name)(**kwargs)
+    else:
+        raise Exception("non-linearity doesn't exist")
+
+def get_norm(name, **kwargs):
+    if hasattr(nn, name):
+        return getattr(nn, name)
+    else:
+        raise Exception("normalization doesn't exist")
