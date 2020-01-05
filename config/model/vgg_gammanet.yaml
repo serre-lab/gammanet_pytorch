@@ -1,0 +1,30 @@
+name: vgg_gammanet
+import_prepath: models.vgg_gammanet
+import_class: VGG_16_GN
+args:
+  weights_path: /media/data_cifs/aimen/CC_experiments/model_weights/vgg_16.pth.tar
+  load_weights: True 
+  gn_params:
+    - ['conv2_2', 3]
+    - ['conv3_3', 3]
+    - ['conv4_3', 3]
+    - ['conv5_3', 1]
+    - ['conv4_3', 1]
+    - ['conv3_3', 1]
+    - ['conv2_2', 1]
+  timesteps: 8
+  hidden_init: 'identity'
+  attention: 'gala' # 'se', None
+  attention_layers: 2
+  saliency_filter_size: 5
+  normalization_fgru: InstanceNorm2d
+  normalization_fgru_params: {'affine': True}
+  normalization_gate: InstanceNorm2d
+  normalization_gate_params: {'affine': True}
+  force_alpha_divisive: True
+  force_non_negativity: True
+  multiplicative_excitation: True
+  ff_non_linearity: 'ReLU'
+  us_resize_before_block: True
+  readout: True
+  readout_feats: 1

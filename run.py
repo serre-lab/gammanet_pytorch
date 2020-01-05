@@ -1,11 +1,8 @@
 import os
-from ops import train_tools
 from ops import experiment_tools
 from utils import py_utils
 import sys
 import logging
-# from ops import data_tools
-# import torch.utils.data as ptdata
 
 def main(cfg):
     logging.info(cfg.pretty())

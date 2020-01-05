@@ -7,12 +7,12 @@ from utils.pt_utils import conv2d_same_padding, Conv2dSamePadding
 from utils import pt_utils
 
 # TODO symmetric init for conv_c1_w and conv_c2_w | maybe already done
-# TODO bias init for gates (chronos)
 # TODO check bn init 
 # TODO add homunculus
 # TODO add different normalization types
 # TODO try varying hidden size (make it independent from input)
 
+# TODO bias init for gates (chronos) done
 # TODO code attention and add it in g1 | done
 # TODO init types for hidden (identity, zero, xavier) | done
 # TODO solve padding issue | done
@@ -33,13 +33,14 @@ class fGRUCell(nn.Module):
                 # attention_normalization=True,
                 saliency_filter_size=5,
                 normalization_fgru='InstanceNorm2d',
-                normalization_fgru_params={},
+                normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
-                normalization_gate_params={},
+                normalization_gate_params={'affine': True},
                 ff_non_linearity='ReLU',
                 force_alpha_divisive=True,
                 force_non_negativity=True,
-                multiplicative_excitation=True):
+                multiplicative_excitation=True,
+                gate_bias_init='chronos'):
         super().__init__()
         
         self.padding = 'same' # kernel_size // 2
@@ -82,38 +83,48 @@ class fGRUCell(nn.Module):
                 raise 'attention type unknown'
         else:
             self.conv_g1_w = nn.Parameter(torch.empty(hidden_size , hidden_size, 1, 1))
-            init.orthogonal_(self.conv_g1_w)
+            init.xavier_normal_(self.conv_g1_w)
 
         self.conv_g1_b = nn.Parameter(torch.empty(hidden_size,1,1))
 
         if self.normalization_gate:
             self.bn_g1 = normalization_gate(hidden_size, **self.normalization_gate_params)
-            # init.constant_(self.bn_g1.weight, 0.1)
+            init.constant_(self.bn_g1.weight, 0.1)
+            init.constant_(self.bn_g1.bias, 0)
 
         if self.normalization_fgru:
             self.bn_c1 = normalization_fgru(hidden_size, **self.normalization_fgru_params)
-            #init.constant_(self.bn_c1.weight, 0.1)
+            init.constant_(self.bn_c1.weight, 0.1)
+            init.constant_(self.bn_c1.bias, 0)
 
         self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
 
         self.conv_g2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , 1, 1))
+        init.xavier_normal_(self.conv_g2_w)
+
         self.conv_g2_b = nn.Parameter(torch.empty(hidden_size,1,1))
         
         if self.normalization_gate:
-            self.bn_g2 = normalization_gate(hidden_size, **self.normalization_gate_params)
-            #init.constant_(self.bn_g2.weight, 0.1)
+            self.bn_g2 = normalization_gate(hidden_size, **self.normalization_gate_params) 
+            init.constant_(self.bn_g2.weight, 0.1)
+            init.constant_(self.bn_g2.bias, 0)
 
         if self.normalization_fgru:
-            self.bn_c2 = normalization_fgru(hidden_size, **self.normalization_fgru_params)
-            #init.constant_(self.bn_c2.weight, 0.1)
+            self.bn_c2 = normalization_fgru(hidden_size, **self.normalization_fgru_params) 
+            init.constant_(self.bn_c2.weight, 0.1)
+            init.constant_(self.bn_c2.bias, 0)
         
         self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
         
-        init.orthogonal_(self.conv_c1_w)
-        init.orthogonal_(self.conv_c2_w)
+        init.kaiming_normal_(self.conv_c1_w, mode='fan_out') # variance scaling
+        init.kaiming_normal_(self.conv_c2_w, mode='fan_out') # variance scaling
 
         self.conv_c1_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
         self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
+
+        init.uniform_(self.conv_g1_b.data, 1, 8.0 - 1)
+        self.conv_g1_b.data = -self.conv_g1_b.data.log()
+        self.conv_g2_b.data =  -self.conv_g1_b.data
 
         self.alpha = nn.Parameter(torch.empty((hidden_size,1,1)))
         self.mu = nn.Parameter(torch.empty((hidden_size,1,1)))
@@ -122,11 +133,15 @@ class fGRUCell(nn.Module):
             self.omega = nn.Parameter(torch.empty((hidden_size,1,1)))
             self.kappa = nn.Parameter(torch.empty((hidden_size,1,1)))
         
-        init.constant_(self.alpha, 0.1)
-        init.constant_(self.mu, 1)
+        if self.force_alpha_divisive:
+            init.kaiming_normal_(self.alpha) # variance scaling
+        else:
+            init.constant_(self.alpha, 0.1)
+
+        init.constant_(self.mu, 0)
         if self.multiplicative_excitation:
             init.constant_(self.omega, 1.0)
-            init.constant_(self.kappa, 0.5)
+            init.constant_(self.kappa, 0)
         
 
     def forward(self, input_, prev_state2, timestep=0):
@@ -153,7 +168,7 @@ class fGRUCell(nn.Module):
         if self.normalization_gate:
             g1 = self.bn_g1(g1)
         
-        h2 = h2 * F.sigmoid(g1 + self.conv_g1_b)
+        h2 = h2 * torch.sigmoid(g1 + self.conv_g1_b)
 
         if self.normalization_fgru:
             self.bn_c1(h2)
@@ -165,7 +180,7 @@ class fGRUCell(nn.Module):
         
         # alpha, mu
         if self.force_alpha_divisive:
-            alpha = F.sigmoid(self.alpha)
+            alpha = torch.sigmoid(self.alpha)
         else:
             alpha = self.alpha
         inh = (alpha * h2 + self.mu) * c1
@@ -180,7 +195,7 @@ class fGRUCell(nn.Module):
         g2 = conv2d_same_padding(h1, self.conv_g2_w)
         if self.normalization_gate:
             self.bn_g2(g2)
-        g2 = F.sigmoid(g2+self.conv_g2_b)
+        g2 = torch.sigmoid(g2+self.conv_g2_b)
 
         if self.normalization_fgru:
             c2 = self.bn_c2(h1)
@@ -226,13 +241,18 @@ class SE_Attention(nn.Module):
             else:
                 next_feat = curr_feat * 2
             
-            self.module_list.append(Conv2dSamePadding(curr_feat, next_feat, filter_size))
+            conv = Conv2dSamePadding(curr_feat, next_feat, filter_size)
+            init.xavier_normal_(conv.weight)
+            init.constant_(conv.bias, 0)
+            self.module_list.append(conv)
             
             if non_linearity is not None:
                 nl = pt_utils.get_nl(non_linearity)
                 
             if normalization is not None:
                 norm = pt_utils.get_norm(normalization)(next_feat, **normalization_params)
+                init.constant_(norm.weight, 0.1)
+                init.constant_(norm.bias, 0)
             
             if norm_pre_nl :
                 if normalization is not None:
@@ -276,13 +296,18 @@ class SA_Attention(nn.Module):
             else:
                 next_feat = curr_feat // 2
             
-            self.module_list.append(Conv2dSamePadding(curr_feat, next_feat, filter_size))
+            conv = Conv2dSamePadding(curr_feat, next_feat, filter_size)
+            init.xavier_normal_(conv.weight)
+            init.constant_(conv.bias, 0)
+            self.module_list.append(conv)
             
             if non_linearity is not None:
                 nl = pt_utils.get_nl(non_linearity)
                 
             if normalization is not None:
                 norm = pt_utils.get_norm(normalization)(next_feat, **normalization_params)
+                init.constant_(norm.weight, 0.1)
+                init.constant_(norm.bias, 0)
             
             if norm_pre_nl :
                 if normalization is not None:

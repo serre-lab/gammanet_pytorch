@@ -23,6 +23,7 @@ class VGG_16_hGRU(nn.Module):
         self.base_ff = VGG_16(weights_path=weights_path, load_weights=load_weights)
 
         self.build_fb_layers()
+
         
     
     def build_fb_layers(self):
@@ -56,6 +57,8 @@ class VGG_16_hGRU(nn.Module):
         self.hgru_units = nn.ModuleList(self.hgru_units)
         self.base_blocks = nn.ModuleList(self.base_blocks)
         
+    def build_readout(self):
+        pass
 
     def forward(self, inputs):
         x = inputs
@@ -83,10 +86,18 @@ class VGG_16_hGRU(nn.Module):
                 last_hidden = self.output_block(last_hidden.view([-1]+in_shape[2:]))
                 out_shape = last_hidden.shape.tolist()
                 last_hidden = last_hidden.view(in_shape[:2] + out_shape[1:])
-
+            if hasattr(self,'readout'):
+                in_shape = last_hidden.shape.tolist()
+                last_hidden = self.readout(last_hidden.view([-1]+in_shape[2:]))
+                out_shape = last_hidden.shape.tolist()
+                last_hidden = last_hidden.view(in_shape[:2] + out_shape[1:])
+            
         if hasattr(self, 'output_block'):
             x = self.output_block(x)
 
+        if hasattr(self,'readout'):
+            x = self.readout(x)
+        
         return x, last_hidden
 
 

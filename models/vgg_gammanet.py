@@ -28,8 +28,7 @@ class VGG_16_GN(nn.Module):
                 weights_path, 
                 load_weights=True, 
                 gn_params=[], 
-                timesteps=6,
-                filter_size=9, 
+                timesteps=6, 
                 hidden_init='identity',
                 attention='gala', # 'se', None
                 attention_layers=2,
@@ -42,7 +41,9 @@ class VGG_16_GN(nn.Module):
                 force_non_negativity=True,
                 multiplicative_excitation=True,
                 ff_non_linearity='ReLU',
-                us_resize_before_block=True):
+                us_resize_before_block=True,
+                readout=True,
+                readout_feats=1):
         super().__init__()
         self.timesteps = timesteps
         self.gn_params = gn_params
@@ -73,6 +74,9 @@ class VGG_16_GN(nn.Module):
         self.base_ff = VGG_16(weights_path=weights_path, load_weights=load_weights)
 
         self.build_fb_layers()
+        
+        if readout:
+            self.build_readout(readout_feats)
     
     def build_fb_layers(self):
 
@@ -132,7 +136,9 @@ class VGG_16_GN(nn.Module):
             td_feats = feats
 
         self.input_block = self.ds_blocks.pop(0)
-
+        
+        self.output_feats = td_feats
+        
         self.h_units = nn.ModuleList(self.h_units)
         self.ds_blocks = nn.ModuleList(self.ds_blocks)
 
@@ -153,28 +159,53 @@ class VGG_16_GN(nn.Module):
         # us options: norm top_h, resize before or after block, ...
         normalization_fgru = pt_utils.get_norm(self.normalization_fgru)
         
-        module_list = [
-            normalization_fgru(input_feat,**self.normalization_fgru_params),
-            Conv2dSamePadding(input_feat,output_feat,1),
-            nn.ReLU(),
-            Conv2dSamePadding(output_feat,output_feat,1),
-            nn.ReLU(),
-        ]
         
+        norm = normalization_fgru(input_feat,**self.normalization_fgru_params)
+        init.constant_(norm.weight, 0.1)
+        init.constant_(norm.bias, 0)
+        conv1 = Conv2dSamePadding(input_feat,output_feat,1)
+        init.kaiming_normal_(conv1.weight)
+        init.constant_(conv1.bias, 0)
+        nl1 = nn.ReLU()
+        conv2 = Conv2dSamePadding(output_feat,output_feat,1)
+        init.kaiming_normal_(conv2.weight)
+        init.constant_(conv2.bias, 0)
+        nl2 = nn.ReLU()
+        
+        module_list = [norm,conv1,nl1,conv2,nl2]
         # bilinear resize -> dependent on the other size
         # other version : norm -> conv 1*1 -> norm -> (extra conv 1*1 ->) resize
         # other version : transpose_conv 4*4/2 -> conv 3*3 -> norm
         return nn.Sequential(*module_list)
         
-    def us_block(self, block, input_, out_size):
-        if self.us_resize_before_block:
-            input_ = F.interpolate(input_,out_size, mode='bilinear')
+    def us_block(self, block, input_, out_size, resize_before_block=None):
+        if resize_before_block is None:
+            resize_before_block = self.us_resize_before_block
+        if resize_before_block:
+            input_ = F.interpolate(input_,out_size, mode='bilinear',align_corners=True)
             output = block(input_) 
         else:
             input_ = block(input_)
-            output = F.interpolate(input_,out_size, mode='bilinear') 
+            output = F.interpolate(input_,out_size, mode='bilinear',align_corners=True) 
         
         return output
+
+    def build_readout(self, readout_feats):
+        normalization_fgru = pt_utils.get_norm(self.normalization_fgru)
+        self.readout_norm = normalization_fgru(self.output_feats,**self.normalization_fgru_params)
+        init.constant_(self.readout_norm.weight, 0.1)
+        init.constant_(self.readout_norm.bias, 0)
+        self.readout_conv = Conv2dSamePadding(self.output_feats, readout_feats, 1)
+        init.kaiming_normal_(self.readout_conv.weight)
+        init.constant_(self.readout_conv.bias, 0)
+
+
+    def readout(self, input_, output_size):
+        x = self.readout_norm(input_)
+        x = F.interpolate(x,output_size, mode='bilinear',align_corners=True) 
+        x = self.readout_conv(x)
+
+        return x
 
     def forward(self, inputs, return_hidden=False):
         x = inputs
@@ -207,16 +238,18 @@ class VGG_16_GN(nn.Module):
 
             if return_hidden:
                 last_hidden.append(x)
+        if hasattr(self, 'readout'):
+            x = self.readout(x, inputs.shape[2:])
 
         if return_hidden:
             last_hidden = torch.stack(last_hidden,dim=1)
-            if hasattr(self, 'output_block'):
-                in_shape = last_hidden.shape.tolist()
-                last_hidden = self.output_block(last_hidden.view([-1]+in_shape[2:]))
-                out_shape = last_hidden.shape.tolist()
+            if hasattr(self, 'readout'):
+                in_shape = last_hidden.shape
+                last_hidden = self.readout(last_hidden.view((-1,)+in_shape[2:]), inputs.shape[2:])
+                out_shape = last_hidden.shape
                 last_hidden = last_hidden.view(in_shape[:2] + out_shape[1:])
 
-        if hasattr(self, 'output_block'):
-            x = self.output_block(x)
-
-        return x, last_hidden
+            return x, last_hidden
+        else:
+            return x
+        

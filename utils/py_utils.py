@@ -91,5 +91,4 @@ def setup_logging(path):
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(message)s',
                         handlers=[logging.FileHandler(os.path.join(path,"out.log")),
-                                logging.StreamHandler(sys.stdout),
-                                logging.StreamHandler(sys.stderr)])
+                                logging.StreamHandler(sys.stdout)])

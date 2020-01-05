@@ -1,0 +1,32 @@
+type: train
+name: bd_train
+import_prepath: experiments.boundary_detection
+import_class: BDTrain
+model: -model.vgg_gammanet
+trainset: -dataset.BSDS500_train
+valset: -dataset.BSDS500_val
+dataloader:
+  name: pt_loader
+  kwargs: 
+    batch_size: 4
+    shuffle: true 
+    num_workers: 4
+    pin_memory: True
+optim:
+  name: 'Adam'
+  exclusion_params:
+    - params: [h_units,td_units]
+      lr: 3e-4
+  params:
+    lr: 1e-5
+    betas: [0.9, 0.999]
+epochs: 2048
+cuda: true
+parallel: true
+loss: class_balanced_bce_with_logits
+eval: pixel_error
+log_freq: 20
+sum_freq: 10
+#save_freq: 50
+val_freq: 5
+dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${name}_${model.name}

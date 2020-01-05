@@ -75,6 +75,15 @@ def constancy_score(predicted_XYZ, ideal_XYZ, XYZ, get_stats=False,**kwargs):
 
     return result
 
+def pixel_error(input_,target,reduction='mean',**kwargs):
+    input_ = torch.sigmoid(input_)
+    input_ = (input_>0.5) * 1 # torch.where(input_>0.5,torch.ones_like(input_),torch.zeros_like(input_))
+    target = (target>0.5) * 1
+    error = ((input_ != target)*1.0).float() # torch.where((input_ != target),torch.ones_like(input_),torch.zeros_like(input_))
+    error = error.view([error.shape[0],-1]).sum(-1)
+    if reduction=='mean':
+        error = error.mean()
+    return error
 
 def neg_angular_error(estimate, illum_rgb, reduce=True, **kwargs):
     # Assume all vectors already have unit norm
