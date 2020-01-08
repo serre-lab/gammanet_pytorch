@@ -71,7 +71,10 @@ class SqueezeNet(nn.Module):
 
     def __init__(self, weight_path=None, load_weights=True, freeze_layers=False):
         super().__init__()
-        self.layers = ['conv1', 'pool1', 'fire1', 'fire2', 'pool2', 'fire3', 'fire4', 'pool3', 'fire5', 'fire6', 'fire7', 'fire8']
+        self.layers = ['conv1', 'pool1', 
+                        'fire1', 'fire2', 'pool2', 
+                        'fire3', 'fire4', 'pool3', 
+                        'fire5', 'fire6', 'fire7', 'fire8']
         self.weight_path = weight_path
         self.build_layers()
 

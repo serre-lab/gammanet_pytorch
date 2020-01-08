@@ -92,18 +92,8 @@ class BDTrain(TrainExperiment):
             train_input = train_input.to(self.device)
             train_target = train_target.to(self.device)
 
-        # print(train_input.shape)
-        # print(train_input.mean())
-        
-        # print(train_target.shape)
-        # print(train_target.mean())
-        # print(train_target.max())
         output = self.model(train_input)
 
-        # print(output.shape)
-        # print(output.mean())
-        # print(output.max())
-        # print(output.min())
         loss = self.criterion(output, train_target)
         
         cur_score = self.accuracy(output.data, train_target)
