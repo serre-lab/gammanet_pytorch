@@ -1,6 +1,7 @@
 # gammanet_pytorch
 
-How to start: 
+How to start:
+=============
 
 The pipeline can be launched as symple as:
 
