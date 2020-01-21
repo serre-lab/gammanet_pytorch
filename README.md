@@ -1,7 +1,5 @@
 # gammanet_pytorch
 
-How to start:
-=============
 
 The pipeline can be launched as symple as:
 
@@ -81,3 +79,8 @@ Please take a look at each of the files provided for reference.
     |____data
     | |______init__.py
     | |____BSDS500_100.py
+=======
+Training: `python run.py config/exp/contour_detection`
+
+Parallel raining: `CUDA_VISIBLE_DEVICES=<gpus> python run.py config/exp/contour_detection parallel=true`
+
