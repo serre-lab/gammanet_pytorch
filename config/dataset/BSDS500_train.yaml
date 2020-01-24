@@ -1,0 +1,14 @@
+name: BSDS500_crops
+import_prepath: data.BSDS500_100
+import_class: BSDS500
+images_path: /media/data_cifs/pytorch_projects/datasets/BSDS500_crops/data/images/train
+labels_path: /media/data_cifs/pytorch_projects/datasets/BSDS500_crops/data/groundTruth/train
+transform: 
+  Resize:
+    size: 320
+  # ToTensor: {}
+  # Normalize:
+  #   mean: [0.485, 0.456, 0.406]
+  #   std: [0.229, 0.224, 0.225]
+input: image
+target: label

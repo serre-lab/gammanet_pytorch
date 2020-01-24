@@ -4,161 +4,99 @@ import torch
 import numpy as np
 from torch.nn import init
 
+from models.vgg_16 import VGG_16
+from ops import model_tools
+
 from layers.hgru_base import hConvGRUCell
 
 
-class VGGhGRU(nn.Module):
-    def __init__(self, vgg_weights_path, load_weights=True, filter_size=9, timesteps=6):
+class VGG_16_hGRU(nn.Module):
+    def __init__(self, weights_path, load_weights=True, add_hgru=[], filter_size=9, timesteps=6):
         super().__init__()
-        self.vgg_weights_path = vgg_weights_path
+        
         self.timesteps = timesteps
-        
-        if isinstance(filter_size,int):
-            self.filter_size = [filter_size]*4
-        print('building vgg layers')
-        self.build_vgg_layers()
-        print('building hgru units')
-        self.build_hgru_units()
-        print('building readout layers')
-        self.build_readout()
+        self.weight_path = weight_path
+        self.add_hgru = add_hgru
 
-        if load_weights:
-            self.load_vgg_weights()
+        self.n_hgru_layers = len(add_hgru)
 
-        
-    def build_hgru_units(self):
-        
-        maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.maxpool1 = maxpool1
-        self.unit1 = hConvGRUCell(128, 128, self.filter_size[0])
-        self.unit1.train()
-        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        self.unit2 = hConvGRUCell(256, 256, self.filter_size[1])
-        self.unit2.train()
-        self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        self.unit3 = hConvGRUCell(512, 512, self.filter_size[2])
-        self.unit3.train()
-        self.maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        self.unit4 = hConvGRUCell(512, 512, self.filter_size[3])
-        self.unit4.train()
+        self.base_ff = VGG_16(weights_path=weights_path, load_weights=load_weights)
+
+        self.build_fb_layers()
     
-    def build_vgg_layers(self):
-        #vgg model
-        # self.conv1_1 = nn.Conv2d(  3,  64, kernel_size=3, padding=1)
-        # self.conv1_2 = nn.Conv2d( 64,  64, kernel_size=3, padding=1)
-        # # nn.MaxPool2d(kernel_size=2, stride=2) # five pooling layers
-        # self.conv2_1 = nn.Conv2d( 64, 128, kernel_size=3, padding=1)
-        # self.conv2_2 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+    def build_fb_layers(self):
 
-        # self.conv3_1 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        # self.conv3_2 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
-        # self.conv3_2 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
+        self.hgru_units = []
+        self.hgru_positions = []
+        self.base_blocks = []
+        prev_pos = 0
+        for pos,f_size in self.add_hgru:
+            layer_pos = self.base_ff.layers.index(pos)+1
+            
+            f = self.base_ff.filters[self.base_ff.layers.index(pos)]
+            unit = hConvGRUCell(f, f, f_size)
+            unit.train()
+            self.hgru_units.append(unit)
 
-        # self.conv4_1 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
-        # self.conv4_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
-        # self.conv4_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+            block_layers = [getattr(self.base_ff,k) for k in self.base_ff.layers[prev_pos:layer_pos]]
+            
+            self.base_blocks.append(nn.Sequential(*block_layers) if len(block_layers)==1 else block_layers[0])    
+            prev_pos = layer_pos
 
-        # self.conv5_1 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
-        # self.conv5_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
-        # self.conv5_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        if layer_pos < len(self.base_ff.layers):
 
-        self.vgg_layers = nn.ModuleDict({
-            'conv1_1': nn.Conv2d(  3,  64, kernel_size=3, padding=1),
-            'conv1_2': nn.Conv2d( 64,  64, kernel_size=3, padding=1),
+            block_layers = [getattr(self.base_ff,k) for k in self.base_ff.layers[prev_pos:len(self.base_ff.layers)]]
+            self.base_blocks.append(nn.Sequential(*block_layers) if len(block_layers)==1 else block_layers[0])
 
-            'conv2_1': nn.Conv2d( 64, 128, kernel_size=3, padding=1),
-            'conv2_2': nn.Conv2d( 64, 128, kernel_size=3, padding=1),
+        self.input_block = self.base_blocks.pop(0)
+        if len(self.base_blocks) > len(self.hgru_units):
+            self.output_block = self.base_blocks.pop(-1)
 
-            'conv3_1': nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            'conv3_2': nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            'conv3_3': nn.Conv2d(256, 256, kernel_size=3, padding=1),
-
-            'conv4_1': nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            'conv4_2': nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            'conv4_3': nn.Conv2d(512, 512, kernel_size=3, padding=1),
-
-            'conv5_1': nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            'conv5_2': nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            'conv5_3': nn.Conv2d(512, 512, kernel_size=3, padding=1)            
-        })
-        for k,v in self.vgg_layers.items():
-            v.weight.requires_grad =False
-            v.bias.requires_grad =False
-    
-    def load_vgg_weights(self):
+        self.hgru_units = nn.ModuleList(self.hgru_units)
+        self.base_blocks = nn.ModuleList(self.base_blocks)
         
-        vgg_weights = np.load(self.vgg_weights_path).item()
-        for k in self.vgg_layers:
-            self.vgg_layers[k].weight.data = torch.FloatTensor(vgg_weights[k]['weight'])
-            self.vgg_layers[k].bias.data = torch.FloatTensor(vgg_weights[k]['bias'])
-
     def build_readout(self):
-        self.last_conv = nn.Conv2d(512, 128, kernel_size=1, padding=1)
-        # global average mean layer is replaced by mean op in forward
-        # self.bn = nn.BatchNorm2d(25, eps=1e-03)
-        
-        self.fc = nn.Linear(128, 3)
-        init.xavier_normal_(self.fc.weight)
-        init.constant_(self.fc.bias, 0)
+        pass
 
-    def forward(self, inputs, return_hidden=False,return_error=False):
-        
-        hidden_1 = None
-        hidden_2 = None
-        hidden_3 = None
-        hidden_4 = None
-        l_h = []
-        l_e = []
-
+    def forward(self, inputs):
         x = inputs
+        hgru_hidden = [None] * self.n_hgru_layers
+        conv_input = self.input_block(x)
 
-        x = F.relu(self.vgg_layers['conv1_1'](x))
-        x = F.relu(self.vgg_layers['conv1_2'](x))
-        x = self.maxpool1(x)
-        x = F.relu(self.vgg_layers['conv2_1'](x))
-        x = F.relu(self.vgg_layers['conv2_2'](x))
+        last_hidden = []
 
-        conv_input = x
-        for ts in range(self.timesteps):
+        for i in range(self.timesteps):
             x = conv_input
-            hidden_1, error_1 = self.unit1(x, hidden_1,ts)
-            x = self.maxpool2(hidden_1)
-            
-            x = F.relu(self.vgg_layers['conv3_1'](x))
-            x = F.relu(self.vgg_layers['conv3_2'](x))
-            x = F.relu(self.vgg_layers['conv3_3'](x))
-
-            hidden_2, error_2 = self.unit2(x, hidden_2,ts)
-            x = self.maxpool3(hidden_2)
-            
-            x = F.relu(self.vgg_layers['conv4_1'](x))
-            x = F.relu(self.vgg_layers['conv4_2'](x))
-            x = F.relu(self.vgg_layers['conv4_3'](x))
-
-            hidden_3, error_3 = self.unit3(x, hidden_3,ts)
-            x = self.maxpool4(hidden_3)
-            
-            x = F.relu(self.vgg_layers['conv5_1'](x))
-            x = F.relu(self.vgg_layers['conv5_2'](x))
-            x = F.relu(self.vgg_layers['conv5_3'](x))
-
-            hidden_4, error_4 = self.unit3(x, hidden_4,ts)
-
+            for l in range(self.n_hgru_layers):
+                hidden, _ = self.hgru_units[l](x,hgru_hidden[l], timestep=i)
+                hgru_hidden[l] = hidden
+                if l<len(self.base_blocks):
+                    x = self.base_blocks[l](hidden)
+                else:
+                    x = hidden
             if return_hidden:
-                l_h.append(torch.stack([hidden_1,hidden_2,hidden_3,hidden_4],dim=1))
-            if return_error:
-                l_e.append(torch.stack([error_1,error_2,error_3,error_4],dim=1))
+                last_hidden.append(x)
 
-            
-        x = self.last_conv(hidden_4)
-        x = torch.mean(x.view(x.size(0), x.size(1), -1), dim=2)
-        output = torch.sigmoid(self.fc(x))
         if return_hidden:
-            torch.stack(l_h,dim=1)
-        if return_error:
-            torch.stack(l_e,dim=1)
-        return output, (l_h,l_e)
+            last_hidden = torch.stack(last_hidden,dim=1)
+            if hasattr(self, 'output_block'):
+                in_shape = last_hidden.shape.tolist()
+                last_hidden = self.output_block(last_hidden.view([-1]+in_shape[2:]))
+                out_shape = last_hidden.shape.tolist()
+                last_hidden = last_hidden.view(in_shape[:2] + out_shape[1:])
+            if hasattr(self,'readout'):
+                in_shape = last_hidden.shape.tolist()
+                last_hidden = self.readout(last_hidden.view([-1]+in_shape[2:]))
+                out_shape = last_hidden.shape.tolist()
+                last_hidden = last_hidden.view(in_shape[:2] + out_shape[1:])
+            
+        if hasattr(self, 'output_block'):
+            x = self.output_block(x)
+
+        if hasattr(self,'readout'):
+            x = self.readout(x)
+        
+        return x, last_hidden
+
+
 

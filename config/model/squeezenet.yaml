@@ -1,0 +1,7 @@
+name: squeezenet
+import_prepath: models.squeezenet
+import_class: SqueezeNet
+args:
+  weight_path: /media/data_cifs/aimen/CC_experiments/model_weights/squeezenet.pth.tar
+  load_weights: true 
+  freeze_layers: false

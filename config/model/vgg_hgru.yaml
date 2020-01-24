@@ -1,0 +1,12 @@
+name: vgg_hgru
+import_prepath: models.vgg_hfru
+import_class: VGG_16_hGRU
+args:
+  weight_path: /media/data_cifs/aimen/CC_experiments/model_weights/vgg_16.pth.tar
+  load_weights: true 
+  freeze_layers: false
+  add_hgru:
+    - ['conv1',9]
+    - ['fire2',7]
+    - ['fire8',3]
+  timesteps: 8

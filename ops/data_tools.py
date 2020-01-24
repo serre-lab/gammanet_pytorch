@@ -1,16 +1,15 @@
 import torch.utils.data as data
 from PIL import Image
 from skimage import io, transform
-from utils.ptcolor import rgb2xyz
 import os
 from torchvision import transforms as tv_transforms
-from ops import transforms 
+#from ops import transforms 
 from utils import py_utils
 
 def process_transforms(cfg):
     
     def get_transform(transform, kwargs):
-        assert hasattr(tv_transforms, transform) or hasattr(transforms, transform), "transform operation not found"
+        assert hasattr(tv_transforms, transform), "transform operation not found" #or hasattr(transforms, transform)
 
         if hasattr(tv_transforms, transform):
             return getattr(tv_transforms, transform)(**kwargs)
@@ -19,7 +18,10 @@ def process_transforms(cfg):
     if len(cfg)==0:
         return tv_transforms.ToTensor()
     else:
-        return tv_transforms.Compose([get_transform(t,cfg[t]) for t in cfg] + [tv_transforms.ToTensor()])
+        t = [get_transform(t,cfg[t]) for t in cfg]
+        if 'ToTensor' not in cfg:
+            t = t+[tv_transforms.ToTensor()]
+        return tv_transforms.Compose(t)
 
 
 def get_dataset(cfg):

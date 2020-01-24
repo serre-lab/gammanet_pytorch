@@ -16,6 +16,31 @@ def get_loss(loss_name, **kwargs):
     else:
         print("loss function doesn't exist")
 
+def class_balanced_bce_with_logits(input_, target, gamma=0.5,reduction='mean'):
+    target = torch.where(target>=0.5,torch.ones_like(target),target)
+    ones = (target==1)
+    zeros = (target==0)
+    n_ones = ones.sum()
+    n_zeros = zeros.sum()
+    combined = n_ones+n_zeros
+    ones = ones * (n_zeros * 1./ combined)
+    zeros = zeros * (n_ones * 1./ combined) 
+    weights = ones + zeros
+    out = F.binary_cross_entropy_with_logits(input_, target, reduction='none')
+    out = out * weights
+    if reduction=='mean':
+        out = out.mean()
+    return out
+
+def pixel_error(input_,target,reduction='mean'):
+    input_ = torch.sigmoid(input_)
+    input_ = torch.where(input_>0.5,torch.ones_like(input_),torch.zeros_like(input_))
+    error = torch.where((input_ != target),torch.ones_like(input_),torch.zeros_like(input_))
+    error = error.view([error.shape[0],-1]).sum(-1)
+    if reduction=='mean':
+        error = error.mean()
+    return error
+
 def xyz_cross_entropy(output, target, **kwargs):
     """
         output: class predictions for X Y Z values. shape: [B,3,C] or [B,3,H,W,C]
@@ -92,7 +117,10 @@ def angular_loss(estimate, target, reduce=True):
 
 if __name__ == "__main__":
 
-    print('XYZCrossEntroy' in dir())
+    #print('XYZCrossEntroy' in dir())
+    a = torch.randn([2,10,10])
+    b = torch.where(a>0,torch.ones_like(a), torch.zeros_like(a))
+    print(class_balanced_bce_with_logits(a,b))
     # print(globals()['XYZCrossEntroy'])
     # print('cross_entropy' in dir())
     #print()
