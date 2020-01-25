@@ -22,7 +22,6 @@ class fGRUCell(nn.Module):
     """
     Generate a convolutional GRU cell
     """
-
     def __init__(self, 
                 input_size, 
                 hidden_size, 
@@ -32,6 +31,7 @@ class fGRUCell(nn.Module):
                 attention_layers=2,
                 # attention_normalization=True,
                 saliency_filter_size=5,
+                norm_attention=False,
                 normalization_fgru='InstanceNorm2d',
                 normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
@@ -40,7 +40,8 @@ class fGRUCell(nn.Module):
                 force_alpha_divisive=True,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
-                gate_bias_init='chronos'):
+                gate_bias_init='chronos' #'ones'
+                ):
         super().__init__()
         
         self.padding = 'same' # kernel_size // 2
@@ -50,7 +51,7 @@ class fGRUCell(nn.Module):
         self.hidden_init = hidden_init
 
         self.normalization_fgru = normalization_fgru
-        self.normalization_gate = normalization_fgru
+        self.normalization_gate = normalization_gate
         self.normalization_fgru_params = normalization_fgru_params if normalization_fgru_params is not None else {}
         self.normalization_gate_params = normalization_gate_params if normalization_gate_params is not None else {}
 
@@ -68,14 +69,14 @@ class fGRUCell(nn.Module):
             if attention == 'se':
                 self.attention = SE_Attention(  hidden_size, hidden_size, 1,
                                                 layers=attention_layers, 
-                                                normalization=self.normalization_gate, # 'BatchNorm2D'
+                                                normalization=self.normalization_gate if norm_attention else None, # 'BatchNorm2D'
                                                 normalization_params=self.normalization_gate_params,
                                                 non_linearity=ff_non_linearity,
                                                 norm_pre_nl=False)
             elif attention == 'gala':
                 self.attention = GALA_Attention(hidden_size, hidden_size, saliency_filter_size, 
                                                 layers=attention_layers, 
-                                                normalization=self.normalization_gate, # 'BatchNorm2D'
+                                                normalization=self.normalization_gate if norm_attention else None, # 'BatchNorm2D'
                                                 normalization_params=self.normalization_gate_params,
                                                 non_linearity=ff_non_linearity,
                                                 norm_pre_nl=False)
@@ -83,7 +84,7 @@ class fGRUCell(nn.Module):
                 raise 'attention type unknown'
         else:
             self.conv_g1_w = nn.Parameter(torch.empty(hidden_size , hidden_size, 1, 1))
-            init.xavier_normal_(self.conv_g1_w)
+            init.orthogonal_(self.conv_g1_w) # xavier_normal_
 
         self.conv_g1_b = nn.Parameter(torch.empty(hidden_size,1,1))
 
@@ -100,7 +101,7 @@ class fGRUCell(nn.Module):
         self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
 
         self.conv_g2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , 1, 1))
-        init.xavier_normal_(self.conv_g2_w)
+        init.orthogonal_(self.conv_g2_w) # xavier_normal_
 
         self.conv_g2_b = nn.Parameter(torch.empty(hidden_size,1,1))
         
@@ -116,15 +117,19 @@ class fGRUCell(nn.Module):
         
         self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
         
-        init.kaiming_normal_(self.conv_c1_w, mode='fan_out') # variance scaling
-        init.kaiming_normal_(self.conv_c2_w, mode='fan_out') # variance scaling
+        init.orthogonal_(self.conv_c1_w) # kaiming_normal_(self.conv_c1_w, mode='fan_out') # variance scaling
+        init.orthogonal_(self.conv_c2_w) # kaiming_normal_(self.conv_c2_w, mode='fan_out') # variance scaling
 
         self.conv_c1_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
         self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
 
-        init.uniform_(self.conv_g1_b.data, 1, 8.0 - 1)
-        self.conv_g1_b.data = -self.conv_g1_b.data.log()
-        self.conv_g2_b.data =  -self.conv_g1_b.data
+        if gate_bias_init == 'chronos':
+            init.uniform_(self.conv_g1_b.data, 1, 8.0 - 1)
+            self.conv_g1_b.data = -self.conv_g1_b.data.log()
+            self.conv_g2_b.data =  -self.conv_g1_b.data
+        else:
+            init.constant_(self.conv_g1_b, 1)
+            init.constant_(self.conv_g2_b, 1)
 
         self.alpha = nn.Parameter(torch.empty((hidden_size,1,1)))
         self.mu = nn.Parameter(torch.empty((hidden_size,1,1)))
@@ -165,13 +170,13 @@ class fGRUCell(nn.Module):
             g1 = conv2d_same_padding(h2, self.conv_g1_w)
         
         # g1_intermediate
-        if self.normalization_gate:
+        if self.normalization_gate is not None:
             g1 = self.bn_g1(g1)
         
         h2 = h2 * torch.sigmoid(g1 + self.conv_g1_b)
 
         if self.normalization_fgru:
-            self.bn_c1(h2)
+            h2 = self.bn_c1(h2)
 
         # c1 -> conv2d symmetric_weights, dilations
         c1 = conv2d_same_padding(h2,self.conv_c1_w)
@@ -194,7 +199,7 @@ class fGRUCell(nn.Module):
 
         g2 = conv2d_same_padding(h1, self.conv_g2_w)
         if self.normalization_gate:
-            self.bn_g2(g2)
+            g2 = self.bn_g2(g2)
         g2 = torch.sigmoid(g2+self.conv_g2_b)
 
         if self.normalization_fgru:
@@ -242,7 +247,7 @@ class SE_Attention(nn.Module):
                 next_feat = curr_feat * 2
             
             conv = Conv2dSamePadding(curr_feat, next_feat, filter_size)
-            init.xavier_normal_(conv.weight)
+            init.orthogonal_(conv.weight) # xavier_normal_
             init.constant_(conv.bias, 0)
             self.module_list.append(conv)
             
@@ -297,7 +302,7 @@ class SA_Attention(nn.Module):
                 next_feat = curr_feat // 2
             
             conv = Conv2dSamePadding(curr_feat, next_feat, filter_size)
-            init.xavier_normal_(conv.weight)
+            init.orthogonal_(conv.weight) # xavier_normal_
             init.constant_(conv.bias, 0)
             self.module_list.append(conv)
             

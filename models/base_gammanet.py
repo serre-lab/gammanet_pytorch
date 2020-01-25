@@ -16,8 +16,6 @@ import torch
 import numpy as np
 from torch.nn import init
 
-from models.vgg_16 import VGG_16
-
 from layers.fgru_base import fGRUCell
 
 from utils.pt_utils import Conv2dSamePadding
@@ -25,24 +23,46 @@ from utils import pt_utils
 
 from ops import model_tools
 
-class VGG_16_GN(nn.Module):
+vgg_example={
+    'name': 'vgg_16',
+    'import_prepath': 'models.vgg_16',
+    'import_class': 'VGG_16',
+    'args': {
+        'weight_path': '/media/data_cifs/aimen/CC_experiments/model_weights/vgg_16.pth.tar',
+        'load_weights': True,
+        'freeze_layers': True,
+        'n_layers': 17
+    }
+}
+
+gn_params_example = [['conv2_2', 3],
+                    ['conv3_3', 3],
+                    ['conv4_3', 3],
+                    ['conv5_3', 1],
+                    ['conv4_3', 1],
+                    ['conv3_3', 1],
+                    ['conv2_2', 1]]
+
+class BaseGN(nn.Module):
     def __init__(self, 
-                base_ff, 
-                gn_params=[], 
+                base_ff=vgg_example, 
+                gn_params=gn_params_example, 
                 timesteps=6, 
                 hidden_init='identity',
                 attention='gala', # 'se', None
                 attention_layers=2,
                 saliency_filter_size=5,
+                norm_attention=False,
                 normalization_fgru='InstanceNorm2d',
-                normalization_fgru_params={},
+                normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
-                normalization_gate_params={},
+                normalization_gate_params={'affine': True},
                 force_alpha_divisive=True,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
                 ff_non_linearity='ReLU',
                 us_resize_before_block=True,
+                skip_horizontal=True,
                 readout=True,
                 readout_feats=1):
         super().__init__()
@@ -63,6 +83,7 @@ class VGG_16_GN(nn.Module):
             'attention'                 : attention,
             'attention_layers'          : attention_layers,
             'saliency_filter_size'      : saliency_filter_size,
+            'norm_attention'            : norm_attention,
             'normalization_fgru'        : normalization_fgru,
             'normalization_fgru_params' : normalization_fgru_params,
             'normalization_gate'        : normalization_gate,
@@ -77,8 +98,10 @@ class VGG_16_GN(nn.Module):
         #VGG_16(weights_path=weights_path, load_weights=load_weights)
 
         self.build_fb_layers()
-        
+        self.skip_horizontal = skip_horizontal
+        self.use_readout=False
         if readout:
+            self.use_readout=True
             self.build_readout(readout_feats)
     
     def build_fb_layers(self):
@@ -213,11 +236,9 @@ class VGG_16_GN(nn.Module):
     def forward(self, inputs, return_hidden=False):
         x = inputs
         h_hidden = [None] * len(self.h_units)
-        
         conv_input = self.input_block(x)
 
         last_hidden = []
-
         for i in range(self.timesteps):
             x = conv_input
 
@@ -234,19 +255,19 @@ class VGG_16_GN(nn.Module):
             for l,h in enumerate(reversed(h_hidden[:-1])):
                 x = self.us_block(self.us_blocks[l], x, h.shape[2:])
                 x, _ = self.td_units[l](h, x, timestep=i)
-
-                x += h
+                if self.skip_horizontal:
+                    x += h
                 h_hidden[len(self.td_units)-l-1] = x
-
 
             if return_hidden:
                 last_hidden.append(x)
-        if hasattr(self, 'readout'):
+
+        if self.use_readout:
             x = self.readout(x, inputs.shape[2:])
 
         if return_hidden:
             last_hidden = torch.stack(last_hidden,dim=1)
-            if hasattr(self, 'readout'):
+            if self.use_readout:
                 in_shape = last_hidden.shape
                 last_hidden = self.readout(last_hidden.view((-1,)+in_shape[2:]), inputs.shape[2:])
                 out_shape = last_hidden.shape

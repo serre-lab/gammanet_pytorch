@@ -23,8 +23,6 @@ class VGG_16_hGRU(nn.Module):
         self.base_ff = VGG_16(weights_path=weights_path, load_weights=load_weights)
 
         self.build_fb_layers()
-
-        
     
     def build_fb_layers(self):
 

@@ -1,6 +1,8 @@
 outputs/
+venv/
 __pycache__/
 nohup.out
 .ipynb_checkpoints/
 *.pyc
+
 *.ipynb

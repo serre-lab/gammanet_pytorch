@@ -71,7 +71,7 @@ class VGG_16_GN(nn.Module):
             'force_non_negativity'      : force_non_negativity,
             'multiplicative_excitation' : multiplicative_excitation
         }
-        self.base_ff = VGG_16(weights_path=weights_path, load_weights=load_weights)
+        self.base_ff = VGG_16(weight_path=weights_path, load_weights=load_weights)
 
         self.build_fb_layers()
         

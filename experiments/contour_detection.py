@@ -18,7 +18,7 @@ from ops import data_tools, model_tools, losses, optimizers, metrics
 from utils import pt_utils, py_utils
 from utils.py_utils import AverageMeter
 
-from experiments.base import TrainExperiment
+from experiments.base import TrainExperiment, TestExperiment
 
 class BDTrain(TrainExperiment):
 
@@ -29,42 +29,10 @@ class BDTrain(TrainExperiment):
         self.setup_loss()
         self.setup_optimizer()
         self.setup_cuda()
-        
-    def setup_optimizer(self):
-        if 'exclusion_params' in self.cfg.optim:
-            param_list = self.cfg.optim.exclusion_params
-            p_list =[]
-            remaining_model_params = list(self.model.parameters())
-            for p in param_list:
-                s_p = {}
-                
-                if isinstance(p['params'], Iterable):
-                    model_params = []
-                    for mp in p['params']:
-                        model_params += list(getattr(self.model,mp).parameters())
-                else:
-                    model_params = getattr(self.model,p['params']).parameters()
-                
-                remaining_model_params = list(set(remaining_model_params) - set(model_params))
-                s_p['params'] = model_params
-                if 'lr' in p:
-                    s_p['lr'] = p['lr']
-                if 'betas' in p:
-                    s_p['betas'] = p['betas']
-                if 'weight_decay' in p:
-                    s_p['weight_decay'] = p['weight_decay']
-
-                p_list.append(s_p)
-            p_list.append({'params': remaining_model_params})
-            optimizer = optimizers.get_optimizer(self.cfg.optim.name)(p_list, **self.cfg.optim.params)
-            self.optimizer = optimizer
-
-        else:
-            optimizer = optimizers.get_optimizer(self.cfg.optim.name)(self.model.parameters(), **self.cfg.optim.params)
-            self.optimizer = optimizer
 
     def load(self, path):
         super().load(path)
+        checkpoint = torch.load(path)
         if 'best_error' in checkpoint:
             self.best_error = checkpoint['best_error'] 
 
@@ -79,6 +47,7 @@ class BDTrain(TrainExperiment):
 
     def init_train(self):
         super().init_train()
+        
         if 'checkpoint' not in self.cfg:
             self.best_error = 1000000
             
@@ -100,12 +69,21 @@ class BDTrain(TrainExperiment):
         
         loss.backward()
 
+        if 'track_grads' in self.cfg:
+            if 'grad_stats' in self.cfg.track_grads and self.global_iters%self.cfg.track_grads.grad_stats.freq==0 and self.global_iters!=0:
+                self.track_grad_stats()
+            if 'grad_hist' in self.cfg.track_grads and self.global_iters%self.cfg.track_grads.grad_hist.freq==0 and self.global_iters!=0:
+                self.track_grad_hist()
+
         self.optimizer.step()
         self.optimizer.zero_grad()
 
         self.t_hist['batch_time'].update(time.perf_counter() - start)
         self.t_hist['loss'].update(loss.data.item(), train_input.size(0))
         self.t_hist['score'].update(cur_score.data.item(), train_input.size(0))
+
+        if 'track_weights' in self.cfg and self.global_iters%self.cfg.track_weights.freq==0 and self.global_iters!=0:
+            self.track_weight_hist()
     
     def validate(self):
         self.init_val()
@@ -146,15 +124,16 @@ class BDTrain(TrainExperiment):
                 with torch.no_grad():
                     self.logger.info('validation epoch %d'%(self.cur_epoch,))
                     self.validate()
-                    if self.best_error > self.v_hist['score'].avg:
-                        self.best_error = self.v_hist['score'].avg
+                    self.plot_recurrence(5)
+                    if self.best_error > self.v_hist['loss'].avg:
+                        self.best_error = self.v_hist['loss'].avg
                         self.save(os.path.join(self.cfg.dir,'ckpt_%d_%.03f.pth.tar'%(self.cur_epoch,self.best_error)))
-                        self.plot_recurrence(5)
+                        
                 
             if self.save_freq is not None and self.cur_epoch%self.save_freq==0:
                 self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
-                with torch.no_grad():
-                    self.plot_recurrence(5)
+                # with torch.no_grad():
+                #     self.plot_recurrence(5)
         self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
     
     def plot_recurrence(self,n_samples, target_shape=200):
@@ -198,5 +177,88 @@ class BDTrain(TrainExperiment):
             im.save(os.path.join(example_path,"%d_%i.png"%(self.cur_epoch,i)))
 
             
+class BDTest(TestExperiment):
+
+    def init_test(self):
         
+        self.model.eval()
+        self.result_path = os.path.join(self.cfg.dir,'results')
+        self.preds_path = os.path.join(self.cfg.dir,'preds')
+        
+        py_utils.ensure_dir(self.result_path)
+        py_utils.ensure_dir(self.preds_path)
+
+        self.t_hist = {}
+        self.t_hist['loss'] = []
+        self.t_hist['score'] = []
+
+    def test(self):
+        self.init_test()
+
+        for i, sample in enumerate(self.test_loader):
+            test_input = sample[self.cfg.testset.input]
+            test_target = sample[self.cfg.testset.target].float()
+            im_name = self.test_set.get_name(i)
+            if self.cuda:
+                test_input = test_input.to(self.device)
+                test_target = test_target.to(self.device)
+
+            if self.cfg.plot_recurrence and 'timesteps' in self.exp_cfg.model.args:
+                _, output = self.model.forward(test_input,return_hidden=True)
+            else:
+                output = self.model.forward(test_input)
+            output = torch.sigmoid(output)
+            self.plot_example(i, output.cpu().numpy()[0], out_path=os.path.join(self.result_path,im_name+'.png'))
+            
+            if len(output.shape)>4:
+                output = output[:,-1]
+            
+            loss = self.criterion(output, test_target)
+            
+            cur_score = self.accuracy(output.data, test_target)
+
+            output = output[0].cpu().numpy()
+
+            self.t_hist['loss'].append(loss.data.item())
+            self.t_hist['score'].append(cur_score.data.item())
+            
+            np.save(os.path.join(self.preds_path, im_name+'.npy'), output)
+            
+    def run(self):
+        self.load(self.cfg.checkpoint)
+        with torch.no_grad():
+            self.test()
+        np.save(os.path.join(self.cfg.dir, 'results.npy'), self.t_hist)
+
+    def plot_example(self, image_idx, output, out_path, target_shape=200):
+
+        #sample = self.val_set[image_idx]
+        
+        im = self.test_set.get_image(image_idx)
+        gt = self.test_set.get_label(image_idx)[:,:,None]
+
+        viz = [im]
+
+        aspect_ratio = 1.0*im.shape[1]/im.shape[0]
+        out_shape = (int(target_shape),int(target_shape*aspect_ratio))
+
+        if len(output.shape)>3:
+            output = np.transpose(output,(0,2,3,1))
+            for o in output:
+                viz.append(o)
+        else:
+            output = np.transpose(output,(1,2,0))
+            viz.append(output)
+
+        viz.append(gt)
+        for j in range(len(viz)):
+            if viz[j].shape[-1] == 1:
+                viz[j] = np.concatenate([viz[j],viz[j],viz[j]],axis=-1)
+            viz[j] = si.transform.resize(viz[j],out_shape)
+            viz[j] = np.pad(viz[j] ,((1,1),(1,1),(0,0)),'constant',constant_values=1)
+        viz = (np.concatenate(viz,axis=1)*255).astype(np.uint8)
+        
+        im = Image.fromarray(viz)
+        im.save(out_path)
+    
             

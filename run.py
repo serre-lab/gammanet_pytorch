@@ -4,6 +4,10 @@ from utils import py_utils
 import sys
 import logging
 
+import torch
+
+torch.backends.cudnn.benchmark = True
+
 def main(cfg):
     logging.info(cfg.pretty())
     exp = experiment_tools.get_experiment(cfg)

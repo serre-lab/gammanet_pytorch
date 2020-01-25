@@ -38,9 +38,12 @@ class BSDS500(data.Dataset):
 
     def get_image(self,idx):
         image = Image.open(self.image_list[idx])
-        image = np.array(image.getdata()).reshape(image.size[0], image.size[1], 3)
+        image = np.array(image.getdata()).reshape(image.size[1], image.size[0], 3)
         return image/255.0
     
     def get_label(self,idx):
         label = np.load(self.label_list[idx])
         return label
+    
+    def get_name(self,idx):
+        return self.image_list[idx].split('/')[-1].split('.')[0]

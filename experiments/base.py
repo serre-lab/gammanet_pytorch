@@ -1,18 +1,19 @@
 
-import os
-import time
-import logging
-import numpy as np
-from collections import OrderedDict
-
-import torch
 import torch.utils.data as ptdata
+import torch
 from torch.utils.tensorboard import SummaryWriter
 
+import numpy as np
+
+import time
+
+from collections import OrderedDict, Iterable
 from ops import data_tools, model_tools, losses, optimizers, metrics
 from utils import pt_utils, py_utils
-from utils.py_utils import AverageMeter
+from utils.py_utils import AverageMeter, load_config
+import logging
 
+import os
 
 class Experiment:
     
@@ -34,9 +35,10 @@ class TrainExperiment(Experiment):
         self.setup_data()
         self.setup_dataloader()
         self.setup_model()
-        self.setup_cuda()
         self.setup_loss()
         self.setup_optimizer()
+        self.setup_cuda()
+        
 
     def setup_data(self):
         train_set = data_tools.get_set(self.cfg.trainset)
@@ -60,6 +62,10 @@ class TrainExperiment(Experiment):
     def setup_model(self):
         self.model = model_tools.get_model(self.cfg.model)
 
+        model_parameters = filter(lambda p: p.requires_grad, self.model.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.logger.info('number of trainable parameters : %d'%params)
+
     def setup_cuda(self):
         self.cuda = self.cfg.cuda and self.cuda
 
@@ -77,8 +83,44 @@ class TrainExperiment(Experiment):
             self.accuracy = metrics.get_eval(self.cfg.eval)
 
     def setup_optimizer(self):
-        optimizer = optimizers.get_optimizer(self.cfg.optim.name)(self.model.parameters(), **self.cfg.optim.params)
-        self.optimizer = optimizer
+        if 'exclusion_params' in self.cfg.optim:
+            param_list = self.cfg.optim.exclusion_params
+            p_list =[]
+            named_parameters = list(self.model.named_parameters())
+            remaining_model_params = list(self.model.parameters())
+            for p_vars in param_list:
+                s_p = {}
+                if not isinstance(p_vars['params'], str):
+                    model_params = []
+                    for mp in p_vars['params']:
+                        n_p = [p[1] for p in named_parameters if mp in p[0]]
+                        model_params += n_p #list(getattr(self.model,mp).parameters())
+                        self.logger.info('%s excluded params number : %d'%(mp,len(n_p)))
+                else:
+                    model_params = [p[1] for p in named_parameters if p_vars['params'] in p[0]] 
+                    self.logger.info('%s excluded params number : %d'%(p_vars['params'],len(model_params)))
+                    #model_params = # getattr(self.model,p['params']).parameters()
+                
+                remaining_model_params = list(set(remaining_model_params) - set(model_params))
+                
+                s_p['params'] = model_params
+                if 'lr' in p_vars:
+                    s_p['lr'] = p_vars['lr']
+                if 'betas' in p_vars:
+                    s_p['betas'] = p_vars['betas']
+                if 'weight_decay' in p_vars:
+                    s_p['weight_decay'] = p_vars['weight_decay']
+
+                p_list.append(s_p)
+
+            self.logger.info('remaining params number : %d'%len(remaining_model_params))
+            p_list.append({'params': remaining_model_params})
+            optimizer = optimizers.get_optimizer(self.cfg.optim.name)(p_list, **self.cfg.optim.params)
+            self.optimizer = optimizer
+
+        else:
+            optimizer = optimizers.get_optimizer(self.cfg.optim.name)(self.model.parameters(), **self.cfg.optim.params)
+            self.optimizer = optimizer
     
     def load(self, path):
         checkpoint = torch.load(path)
@@ -222,6 +264,54 @@ class TrainExperiment(Experiment):
         train_summary.append(('scalar', 'score/train', np.mean(self.t_hist['score'].history[-self.log_freq:])))
         return train_summary
     
+    def track_grad_stats(self):
+        if isinstance(self.cfg.track_grads.grad_stats.params, str):
+            params = [self.cfg.track_grads.grad_stats.params]
+        else:
+            params = self.cfg.track_grads.grad_stats.params
+        
+        train_summary = []
+        
+        for p in self.model.named_parameters():
+            if p[1].requires_grad and any(param in p[0] for param in params):
+                g = p[1].grad.cpu().data.norm(2).item() / np.sqrt(np.prod(list(p[1].grad.shape)))
+                #print(g)
+                train_summary.append(('scalar', 'grads/'+p[0], g))
+        self.summary(train_summary)
+        
+    def track_grad_hist(self):
+        if isinstance(self.cfg.track_grads.grad_hist.params, str):
+            params = [self.cfg.track_grads.grad_hist.params]
+        else:
+            params = self.cfg.track_grads.grad_hist.params
+        
+        train_summary = []
+
+        for p in self.model.named_parameters():
+            if p[1].requires_grad and any(param in p[0] for param in params):
+                g = p[1].grad.cpu().data.numpy().flatten()
+                if len(g) > 500:
+                    g = g[np.random.choice(len(g), 500, replace=False)]
+                #print(g.shape)
+                train_summary.append(('histogram', 'grad_hist/'+p[0], g))
+        self.summary(train_summary)
+
+    def track_weight_hist(self):
+        if isinstance(self.cfg.track_weights.params, str):
+            params = [self.cfg.track_weights.params]
+        else:
+            params = self.cfg.track_weights.params
+        
+        train_summary = []
+
+        for p in self.model.named_parameters():
+            if p[1].requires_grad and any(param in p[0] for param in params):
+                g = p[1].cpu().data.numpy().flatten()
+                if len(g) > 1000:
+                    g = g[np.random.choice(len(g), 1000, replace=False)]
+                train_summary.append(('histogram', 'weights/'+p[0], g))
+        self.summary(train_summary)
+    
     def get_train_log(self,i):
         log_dict = OrderedDict()
         
@@ -327,3 +417,138 @@ class TrainExperiment(Experiment):
                 self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
         self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
         
+            
+class TestExperiment(Experiment):
+    def __init__(self,cfg):
+        super().__init__(cfg)
+        self.cuda = True if torch.cuda.is_available() else False
+
+        self.exp_cfg = load_config(self.cfg.exp_cfg)
+    
+    def setup(self):
+        self.setup_data()
+        self.setup_dataloader()
+        self.setup_model()
+        self.setup_loss()
+        self.setup_cuda()
+
+    def setup_data(self):
+        self.test_set = data_tools.get_set(self.cfg.testset)
+        
+    def setup_dataloader(self):
+        self.test_loader = ptdata.DataLoader(self.test_set, **self.cfg.dataloader.kwargs)
+
+    def setup_model(self):
+        self.model = model_tools.get_model(self.exp_cfg.model)
+
+        model_parameters = filter(lambda p: p.requires_grad, self.model.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.logger.info('number of trainable parameters : %d'%params)
+
+    def setup_loss(self):
+        if not 'loss' in self.cfg:
+            self.cfg['loss'] = self.exp_cfg.loss
+        
+        self.criterion = losses.get_loss(self.cfg.loss)
+        if 'eval' in self.cfg or 'eval' in self.exp_cfg:
+            if not 'loss' in self.cfg:
+                self.cfg['eval'] = self.exp_cfg.eval
+            self.accuracy = metrics.get_eval(self.cfg.eval)
+
+    def setup_cuda(self):
+        self.cuda = self.cfg.cuda and self.cuda
+        self.device = torch.device("cuda:0" if self.cuda else "cpu")
+        self.model = self.model.to(self.device)
+    
+    def load(self, path):
+        checkpoint = torch.load(path)
+        if 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+            # get module if model is parallel
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if k[:7]=='module.':
+                    name = k[7:] # remove `module.`
+                else:
+                    name = k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+
+            if self.cfg.parallel:
+                self.model.module.load_state_dict(state_dict)
+            else:
+                self.model.load_state_dict(state_dict)
+                
+        if 'epoch' in checkpoint:
+            self.test_epoch = checkpoint['epoch'] 
+
+    def load_model(self, path, load_state_dict=True):
+        if load_state_dict:
+            
+            state_dict = torch.load(path)
+            # get module if model is parallel
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if k[:7]=='module.':
+                    name = k[7:] # remove `module.`
+                else:
+                    name = k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+
+            if self.cfg.parallel:
+                self.model.module.load_state_dict(state_dict)
+            else:
+                self.model.load_state_dict(state_dict)
+            
+        else:
+            self.model = torch.load(path)
+            self.setup_cuda()
+
+    def init_test(self):
+        
+        self.model.eval()
+        self.t_hist = {}
+        self.t_hist['loss'] = []
+        self.t_hist['score'] = []
+
+    def test_step(self, sample):
+
+        test_input = sample[self.cfg.testset.input]
+        test_target = sample[self.cfg.testset.target].float()
+
+        if self.cuda:
+            test_input = test_input.to(self.device)
+            test_target = test_target.to(self.device)
+
+        output = self.model.forward(test_input)
+        
+        loss = self.criterion(output, test_target)
+        
+        cur_score = self.accuracy(output.data, **sample)
+
+        self.t_hist['loss'].append(loss.data.item())
+        self.t_hist['score'].append(cur_score.data.item())
+        self.t_hist['logits'].append(output)
+
+    def test(self):
+        self.init_test()
+        for i, sample in enumerate(self.test_loader):
+            self.test_step(sample)
+        self.logger.info('mean loss ', np.mean(self.t_hist['loss']))
+        self.logger.info('mean score ', np.mean(self.t_hist['score']))
+
+    def run(self):
+        self.load(self.cfg.checkpoint)
+        self.test()
+        np.save(os.path.join(self.cfg.dir, 'results.npy'), self.t_hist)
+        
+class CrossValExperiment(Experiment):
+    """
+    Runs many experiments with different folds.
+    1- setup folder and experiment configs
+    2- let user run each config independently
+    3- combine validation results to get a final score
+    """
+    def __init__(self,cfg):
+        super().__init__(cfg)

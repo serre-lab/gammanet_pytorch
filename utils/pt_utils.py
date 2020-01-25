@@ -80,21 +80,32 @@ def conv2d_same_padding(input, weight, bias=None, stride=(1,1), padding=(1,1), d
     cols_odd = (padding_rows % 2 != 0)
 
     if rows_odd or cols_odd:
-        input = pad(input, [0, int(cols_odd), 0, int(rows_odd)])
+        input = F.pad(input, [0, int(cols_odd), 0, int(rows_odd)])
 
     return F.conv2d(input, weight, bias, stride,
                   padding=(padding_rows // 2, padding_cols // 2),
                   dilation=dilation, groups=groups)
 
-class Conv2dSamePadding(torch.nn.Conv2d):
+class Conv2dSamePadding(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros'):
-        super(Conv2dSamePadding, self).__init__(in_channels, out_channels, kernel_size, stride,
+        super().__init__(in_channels, out_channels, kernel_size, stride,
                  padding, dilation, groups, bias, padding_mode)
 
     def forward(self, input):
         return conv2d_same_padding(input, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+
+class Conv2dPad(nn.Conv2d):
+
+    def conv2d_forward(self, input, weight):
+        if self.padding_mode != 'zeros':
+            expanded_padding = (self.padding[1], self.padding[1], self.padding[0], self.padding[0])
+            return F.conv2d(F.pad(input, expanded_padding, mode=self.padding_mode),
+                            weight, self.bias, self.stride,
+                            (0,0), self.dilation, self.groups)
+        return F.conv2d(input, weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
 
 def get_nl(name, fun=False, **kwargs):
     if hasattr(F, name) and fun:

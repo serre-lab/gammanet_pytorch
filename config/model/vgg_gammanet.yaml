@@ -15,13 +15,13 @@ args:
   timesteps: 8
   hidden_init: 'identity'
   attention: 'gala' # 'se', None
-  attention_layers: 2
-  saliency_filter_size: 5
+  attention_layers: 1 #2
+  saliency_filter_size: 3 #5
   normalization_fgru: InstanceNorm2d
   normalization_fgru_params: {'affine': True}
   normalization_gate: InstanceNorm2d
   normalization_gate_params: {'affine': True}
-  force_alpha_divisive: True
+  force_alpha_divisive: False
   force_non_negativity: True
   multiplicative_excitation: True
   ff_non_linearity: 'ReLU'
