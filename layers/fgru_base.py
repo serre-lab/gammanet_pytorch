@@ -22,6 +22,7 @@ class fGRUCell(nn.Module):
     """
     Generate a convolutional GRU cell
     """
+
     def __init__(self, 
                 input_size, 
                 hidden_size, 
@@ -31,24 +32,32 @@ class fGRUCell(nn.Module):
                 attention_layers=2,
                 # attention_normalization=True,
                 saliency_filter_size=5,
+                tied_kernels=None,
                 norm_attention=False,
                 normalization_fgru='InstanceNorm2d',
                 normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
                 normalization_gate_params={'affine': True},
                 ff_non_linearity='ReLU',
-                force_alpha_divisive=True,
+                force_alpha_divisive=False,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
-                gate_bias_init='chronos' #'ones'
+                gate_bias_init='chronos', #'ones'
+                timesteps=8
                 ):
         super().__init__()
         
         self.padding = 'same' # kernel_size // 2
 
+        self.kernel_size = kernel_size
+        self.tied_kernels = tied_kernels
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.hidden_init = hidden_init
+
+        #self.ff_nl = ff_non_linearity
+        self.ff_nl = pt_utils.get_nl(ff_non_linearity)
 
         self.normalization_fgru = normalization_fgru
         self.normalization_gate = normalization_gate
@@ -57,8 +66,10 @@ class fGRUCell(nn.Module):
 
         self.normalization_gate = normalization_gate
 
-        normalization_fgru = pt_utils.get_norm(normalization_fgru)
-        normalization_gate = pt_utils.get_norm(normalization_gate)
+        if self.normalization_fgru:
+            normalization_fgru = pt_utils.get_norm(normalization_fgru)
+        if self.normalization_gate:
+            normalization_gate = pt_utils.get_norm(normalization_gate)
 
         self.force_alpha_divisive = force_alpha_divisive
         self.force_non_negativity = force_non_negativity
@@ -98,8 +109,15 @@ class fGRUCell(nn.Module):
             init.constant_(self.bn_c1.weight, 0.1)
             init.constant_(self.bn_c1.bias, 0)
 
-        self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
-
+        if tied_kernels=='channel':
+            self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , hidden_size , 1, 1))
+        elif tied_kernels=='spatial':
+            self.conv_c1_w = nn.Parameter(torch.empty(1 , 1 , kernel_size, kernel_size))
+        elif tied_kernels=='depth':
+            self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , 1 , kernel_size, kernel_size))
+        else:
+            self.conv_c1_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
+        
         self.conv_g2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , 1, 1))
         init.orthogonal_(self.conv_g2_w) # xavier_normal_
 
@@ -115,16 +133,24 @@ class fGRUCell(nn.Module):
             init.constant_(self.bn_c2.weight, 0.1)
             init.constant_(self.bn_c2.bias, 0)
         
-        self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
+        if tied_kernels=='channel':
+            self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , 1, 1))
+        elif tied_kernels=='spatial':
+            self.conv_c2_w = nn.Parameter(torch.empty(1 , 1 , kernel_size, kernel_size))
+        elif tied_kernels=='depth':
+            self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , 1 , kernel_size, kernel_size))
+        else:
+            self.conv_c2_w = nn.Parameter(torch.empty(hidden_size , hidden_size , kernel_size, kernel_size))
         
         init.orthogonal_(self.conv_c1_w) # kaiming_normal_(self.conv_c1_w, mode='fan_out') # variance scaling
         init.orthogonal_(self.conv_c2_w) # kaiming_normal_(self.conv_c2_w, mode='fan_out') # variance scaling
 
-        self.conv_c1_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
-        self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
+        if tied_kernels!='depth':
+            self.conv_c1_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
+            self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
 
         if gate_bias_init == 'chronos':
-            init.uniform_(self.conv_g1_b.data, 1, 8.0 - 1)
+            init.uniform_(self.conv_g1_b.data, 1.0, max(float(timesteps- 1), 1.0))
             self.conv_g1_b.data = -self.conv_g1_b.data.log()
             self.conv_g2_b.data =  -self.conv_g1_b.data
         else:
@@ -147,16 +173,19 @@ class fGRUCell(nn.Module):
         if self.multiplicative_excitation:
             init.constant_(self.omega, 1.0)
             init.constant_(self.kappa, 0)
-        
 
     def forward(self, input_, prev_state2, timestep=0):
+        #ff_nl = pt_utils.get_nl(self.ff_nl)
+        
         if timestep == 0 and prev_state2 is None:
-            prev_state2 = torch.empty_like(input_)
+            
             if self.hidden_init =='identity':
                 prev_state2 = input_
             elif self.hidden_init =='zero':
+                prev_state2 = torch.empty_like(input_)
                 init.zeros_(prev_state2)
             else:
+                prev_state2 = torch.empty_like(input_)
                 init.xavier_normal_(prev_state2)
 
         i = timestep
@@ -164,7 +193,7 @@ class fGRUCell(nn.Module):
         h2 = prev_state2
         ############## circuit input
         
-        if self.attention is not None:
+        if hasattr(self,'attention'):
             g1 = self.attention(h2)
         else:
             g1 = conv2d_same_padding(h2, self.conv_g1_w)
@@ -175,11 +204,18 @@ class fGRUCell(nn.Module):
         
         h2 = h2 * torch.sigmoid(g1 + self.conv_g1_b)
 
-        if self.normalization_fgru:
-            h2 = self.bn_c1(h2)
-
         # c1 -> conv2d symmetric_weights, dilations
-        c1 = conv2d_same_padding(h2,self.conv_c1_w)
+        if self.tied_kernels=='channel':
+            c1 = tied_conv2d_same_padding(h2,self.conv_c1_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
+        elif self.tied_kernels=='spatial':
+            c1 = space_tied_conv2d_same_padding(h2,self.conv_c1_w, padding_mode='reflect')
+        elif self.tied_kernels=='depth':
+            c1 = conv2d_same_padding(h2,self.conv_c1_w, groups=self.hidden_size, padding_mode='reflect')
+        else:
+            c1 = conv2d_same_padding(h2,self.conv_c1_w)
+
+        if self.normalization_fgru:
+            c1 = self.bn_c1(c1)
 
         ############## input integration
         
@@ -188,12 +224,12 @@ class fGRUCell(nn.Module):
             alpha = torch.sigmoid(self.alpha)
         else:
             alpha = self.alpha
-        inh = (alpha * h2 + self.mu) * c1
+        inh = (alpha * prev_state2 + self.mu) * c1
 
         if self.force_non_negativity:
-            h1 = F.relu(F.relu(input_) - F.relu(inh))
+            h1 = self.ff_nl(self.ff_nl(input_) - self.ff_nl(inh))
         else:
-            h1 = F.relu(input_ - inh)
+            h1 = self.ff_nl(input_ - inh)
 
         ############## circuit output
 
@@ -202,16 +238,24 @@ class fGRUCell(nn.Module):
             g2 = self.bn_g2(g2)
         g2 = torch.sigmoid(g2+self.conv_g2_b)
 
+        if self.tied_kernels=='channel':
+            c2 = tied_conv2d_same_padding(h1,self.conv_c2_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
+        elif self.tied_kernels=='spatial':
+            c2 = space_tied_conv2d_same_padding(h1,self.conv_c2_w, padding_mode='reflect')
+        elif self.tied_kernels=='depth':
+            c2 = conv2d_same_padding(h1,self.conv_c2_w, groups=self.hidden_size, padding_mode='reflect')
+        else:
+            c2 = conv2d_same_padding(h1, self.conv_c2_w)
+
         if self.normalization_fgru:
-            c2 = self.bn_c2(h1)
-        c2 = conv2d_same_padding(c2, self.conv_c2_w)
+            c2 = self.bn_c2(c2)
 
         ############## output integration
 
         if self.multiplicative_excitation:
-            h2_hat = F.relu( self.kappa*(h1 + c2) + self.omega*(h1 * c2) )
+            h2_hat = self.ff_nl( self.kappa*(h1 + c2) + self.omega*(h1 * c2) )
         else:
-            h2_hat = F.relu(h1 + c2)
+            h2_hat = self.ff_nl(h1 + c2)
 
         h2 = (1 - g2) * prev_state2 + g2 * h2_hat
         
