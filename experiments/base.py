@@ -141,8 +141,8 @@ class TrainExperiment(Experiment):
             else:
                 self.model.load_state_dict(state_dict)
                 
-        if 'optimizer_state_dict' in checkpoint:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # if 'optimizer_state_dict' in checkpoint:
+        #     self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if 'epoch' in checkpoint:
             self.cur_epoch = checkpoint['epoch'] 
         if 'best_score' in checkpoint:
