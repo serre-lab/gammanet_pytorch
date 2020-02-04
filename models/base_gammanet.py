@@ -178,6 +178,8 @@ class BaseGN(nn.Module):
             module_list.append(getattr(self.base_ff,l))
             if 'conv' in l:
                 module_list.append(nn.ReLU())
+            
+            
         
         return nn.Sequential(*module_list) if len(module_list)>1 else module_list[0]
 
@@ -276,4 +278,18 @@ class BaseGN(nn.Module):
             return x, last_hidden
         else:
             return x
+        
+
+class BaseResNetGN(BaseGN):
+
+    def create_ds_block(self,base_layers):
+        # ds block: depends on base_ff non_linearity and bn
+        module_list = []
+        for l in base_layers:
+            module_list.append(getattr(self.base_ff,l))
+            if 'bn1' in l:
+                module_list.append(nn.ReLU())
+            
+        return nn.Sequential(*module_list) if len(module_list)>1 else module_list[0]
+ 
         

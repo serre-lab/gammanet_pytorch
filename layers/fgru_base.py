@@ -22,7 +22,6 @@ class fGRUCell(nn.Module):
     """
     Generate a convolutional GRU cell
     """
-
     def __init__(self, 
                 input_size, 
                 hidden_size, 
@@ -32,8 +31,8 @@ class fGRUCell(nn.Module):
                 attention_layers=2,
                 # attention_normalization=True,
                 saliency_filter_size=5,
-                tied_kernels=None,
                 norm_attention=False,
+                tied_kernels='depth',
                 normalization_fgru='InstanceNorm2d',
                 normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
@@ -42,8 +41,7 @@ class fGRUCell(nn.Module):
                 force_alpha_divisive=False,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
-                gate_bias_init='chronos', #'ones'
-                timesteps=8
+                gate_bias_init='chronos' #'ones'
                 ):
         super().__init__()
         
@@ -150,7 +148,7 @@ class fGRUCell(nn.Module):
             self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
 
         if gate_bias_init == 'chronos':
-            init.uniform_(self.conv_g1_b.data, 1.0, max(float(timesteps- 1), 1.0))
+            init.uniform_(self.conv_g1_b.data, 1, 8.0 - 1)
             self.conv_g1_b.data = -self.conv_g1_b.data.log()
             self.conv_g2_b.data =  -self.conv_g1_b.data
         else:
@@ -203,6 +201,9 @@ class fGRUCell(nn.Module):
             g1 = self.bn_g1(g1)
         
         h2 = h2 * torch.sigmoid(g1 + self.conv_g1_b)
+
+        if self.normalization_fgru:
+            h2 = self.bn_c1(h2)
 
         # c1 -> conv2d symmetric_weights, dilations
         if self.tied_kernels=='channel':
