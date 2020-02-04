@@ -2,8 +2,8 @@ name: resnet_gammanet
 import_prepath: models.base_gammanet
 import_class: BaseResNetGN
 args:
-  base_ff: -model.ResNet18_test
-  gn_params: [['conv2_2', 3],['conv3_3', 3],['conv4_3', 3],['conv5_3', 1],['conv4_3', 1],['conv3_3', 1],['conv2_2', 1]]
+  base_ff: -model.resnet
+  gn_params: [['conv1', 3],['layer1', 3],['layer2', 1],['layer3', 1],['layer4', 1]]
   timesteps: 8
   hidden_init: 'identity'
   attention: 'gala' # 'se', None

@@ -32,6 +32,7 @@ class fGRUCell(nn.Module):
                 # attention_normalization=True,
                 saliency_filter_size=5,
                 norm_attention=False,
+                tied_kernels='depth',
                 normalization_fgru='InstanceNorm2d',
                 normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',

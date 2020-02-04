@@ -1,0 +1,6 @@
+name: resnet_hgru
+import_prepath: models.resnet
+import_class: ResNet18_test
+args:
+  pretrained: true 
+  progress: true
