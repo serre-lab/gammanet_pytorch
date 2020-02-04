@@ -3,7 +3,7 @@ import_prepath: models.base_gammanet
 import_class: BaseResNetGN
 args:
   base_ff: -model.resnet
-  gn_params: [['conv1', 3],['layer1', 3],['layer2', 1],['layer3', 1],['layer4', 1]]
+  gn_params: [['conv1', 3],['layer1', 3],['layer2', 1],['layer3', 1],['layer4', 1],['layer3', 1],['layer2', 1],['layer1', 1],['conv1', 1]]
   timesteps: 8
   hidden_init: 'identity'
   attention: 'gala' # 'se', None
