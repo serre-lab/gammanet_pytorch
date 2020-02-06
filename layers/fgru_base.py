@@ -24,7 +24,6 @@ class fGRUCell(nn.Module):
     """
     Generate a convolutional GRU cell
     """
-
     def __init__(self, 
                 input_size, 
                 hidden_size, 
@@ -34,8 +33,8 @@ class fGRUCell(nn.Module):
                 attention_layers=2,
                 # attention_normalization=True,
                 saliency_filter_size=5,
-                tied_kernels=None,
                 norm_attention=False,
+                tied_kernels='depth',
                 normalization_fgru='InstanceNorm2d',
                 normalization_fgru_params={'affine': True},
                 normalization_gate='InstanceNorm2d',
@@ -44,8 +43,7 @@ class fGRUCell(nn.Module):
                 force_alpha_divisive=True,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
-                gate_bias_init='chronos', #'ones'
-                timesteps=8
+                gate_bias_init='chronos' #'ones'
                 ):
         super().__init__()
         
@@ -158,6 +156,7 @@ class fGRUCell(nn.Module):
             self.conv_g2_b.data = torch.FloatTensor(- init_chronos)
             
             #self.conv_g2_b.data =  -self.conv_g1_b.data
+
         else:
             init.constant_(self.conv_g1_b, 1)
             init.constant_(self.conv_g2_b, 1)
@@ -212,6 +211,9 @@ class fGRUCell(nn.Module):
         # this changed from conv -> bn(in) -> bias -> sigmoid
         #                to conv -> sigmoid -> bn (beta is chronos)
         h2_int_2 = h2_int * torch.sigmoid(g1_n + self.conv_g1_b)
+
+        if self.normalization_fgru:
+            h2 = self.bn_c1(h2)
 
         # c1 -> conv2d symmetric_weights, dilations
         if self.tied_kernels=='channel':

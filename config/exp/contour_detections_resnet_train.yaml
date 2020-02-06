@@ -1,0 +1,45 @@
+type: train
+name: bd_resnet_train
+import_prepath: experiments.contour_detection
+import_class: BDTrain
+model: -model.resnet_gammanet
+trainset: -dataset.BSDS500_train
+valset: -dataset.BSDS500_val
+dataloader:
+  name: pt_loader
+  kwargs: 
+    batch_size: 4
+    shuffle: true 
+    num_workers: 4
+    pin_memory: True
+optim:
+  name: 'Adam'
+  exclusion_params:
+    - params: [base_ff]
+      lr: 1e-5
+      weight_decay: 0.0002
+  params:
+    lr: 3e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0002
+epochs: 300
+cuda: true
+parallel: true
+loss: class_balanced_bce_with_logits
+eval: pixel_error
+track_grads:
+  grad_stats:
+    params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+    freq: 50
+  grad_hist:
+    params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+    freq: 250
+track_weights:
+  params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+  freq: 250
+log_freq: 20
+sum_freq: 10
+save_freq: 5
+val_freq: 5
+#checkpoint: outputs/2020-01-12/00-27-31_bd_train_base_gammanet/ckpt_10_0.004.pth.tar
+dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_${name}_${model.name}
