@@ -25,18 +25,21 @@ optim:
 epochs: 300
 cuda: true
 parallel: true
+gpus: 4
 loss: class_balanced_bce_with_logits
 eval: pixel_error
 track_grads:
-  grad_stats:
-    params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
-    freq: 50
-  grad_hist:
-    params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
-    freq: 250
-track_weights:
-  params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
-  freq: 250
+  grad_flow:
+    freq: 240
+  # grad_stats:
+  #   params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+  #   freq: 50
+  # grad_hist:
+  #   params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+  #   freq: 250
+# track_weights:
+#   params: ['h_units.0.conv_c2_w', 'h_units.0.conv_c1_w','td_units.2.conv_c2_w', 'td_units.2.conv_c1_w', 'base_ff.conv2_2']
+#   freq: 250
 log_freq: 20
 sum_freq: 10
 save_freq: 5

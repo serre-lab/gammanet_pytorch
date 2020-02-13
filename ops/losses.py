@@ -24,13 +24,45 @@ def class_balanced_bce_with_logits(input_, target, gamma=0.5,reduction='mean'):
     n_zeros = zeros.sum()
     combined = n_ones+n_zeros
     ones = ones * (n_zeros * 1./ combined)
-    zeros = zeros * (n_ones * 1./ combined) 
+    zeros = zeros * (n_ones * 1.1/ combined) 
     weights = ones + zeros
     out = F.binary_cross_entropy_with_logits(input_, target, reduction='none')
     out = out * weights
     if reduction=='mean':
         out = out.mean()
     return out
+
+def class_balanced_bce_with_logits_old(input_, target, gamma=0.5,reduction='mean'):
+    # target = torch.where(target>0.5,torch.ones_like(target),target)
+    
+    neg_labels = torch.where(target<=0.0,torch.ones_like(target),torch.zeros_like(target))
+    pos_labels = torch.where(target>gamma,torch.ones_like(target),torch.zeros_like(target))
+
+    mask = neg_labels + pos_labels
+
+    # ones = (target==1)
+    # zeros = (target==0)
+    n_ones = pos_labels.sum()
+    n_zeros = (1-pos_labels).sum()
+
+    beta = n_zeros/(n_zeros+n_ones)
+
+    pos_weight = beta / (1 - beta)
+
+    # combined = n_ones+n_zeros
+    # ones = ones * (n_zeros * 1./ combined)
+    # zeros = zeros * (n_ones * 1./ combined) 
+    # weights = ones + zeros
+    out = F.binary_cross_entropy_with_logits(input_, pos_labels, reduction='none')
+    out = out * pos_weight
+    out *= mask
+    out *= (1-beta)
+
+    if reduction=='mean':
+        out = out.mean()
+    return out
+    
+    
 
 def pixel_error(input_,target,reduction='mean'):
     input_ = torch.sigmoid(input_)

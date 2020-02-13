@@ -20,6 +20,9 @@ from utils.py_utils import AverageMeter
 
 from experiments.base import TrainExperiment, TestExperiment
 
+import matplotlib
+matplotlib.use('Agg')
+
 class BDTrain(TrainExperiment):
 
     def setup(self):
@@ -74,6 +77,8 @@ class BDTrain(TrainExperiment):
                 self.track_grad_stats()
             if 'grad_hist' in self.cfg.track_grads and self.global_iters%self.cfg.track_grads.grad_hist.freq==0 and self.global_iters!=0:
                 self.track_grad_hist()
+            if 'grad_flow' in self.cfg.track_grads and self.global_iters%self.cfg.track_grads.grad_flow.freq==0 and self.global_iters!=0: 
+                self.track_grad_flow()
 
         self.optimizer.step()
         self.optimizer.zero_grad()
@@ -84,6 +89,7 @@ class BDTrain(TrainExperiment):
 
         if 'track_weights' in self.cfg and self.global_iters%self.cfg.track_weights.freq==0 and self.global_iters!=0:
             self.track_weight_hist()
+
     
     def validate(self):
         self.init_val()
@@ -117,18 +123,20 @@ class BDTrain(TrainExperiment):
 
     def run(self):
         self.init_train()
+        examples = np.random.choice(len(self.val_set), 5, replace=False)
         for self.cur_epoch in range(self.cur_epoch, self.cfg.epochs+1):
             self.logger.info('train epoch %d'%(self.cur_epoch,))
+            # import pdb; pdb.set_trace()
             self.train_epoch()
             if self.val_set is not None and self.cur_epoch%self.cfg.val_freq==0:
                 with torch.no_grad():
                     self.logger.info('validation epoch %d'%(self.cur_epoch,))
+                    self.plot_recurrence(examples)
                     self.validate()
-                    self.plot_recurrence(5)
+                    
                     if self.best_error > self.v_hist['loss'].avg:
                         self.best_error = self.v_hist['loss'].avg
                         self.save(os.path.join(self.cfg.dir,'ckpt_%d_%.03f.pth.tar'%(self.cur_epoch,self.best_error)))
-                        
                 
             if self.save_freq is not None and self.cur_epoch%self.save_freq==0:
                 self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
@@ -136,12 +144,12 @@ class BDTrain(TrainExperiment):
                 #     self.plot_recurrence(5)
         self.save(os.path.join(self.cfg.dir,str(self.cur_epoch)+'.pth.tar'))
     
-    def plot_recurrence(self,n_samples, target_shape=200):
+    def plot_recurrence(self,examples=[0,1,2,3,4], target_shape=200):
         example_path = os.path.join(self.cfg.dir,'examples')
         py_utils.ensure_dir(example_path)
 
-        for i in range(n_samples):
-            image_idx = i*5
+        for i,image_idx in enumerate(examples):
+            image_idx = i
             sample = self.val_set[image_idx]
             im = sample[self.cfg.valset.input].cuda()
             if 'timesteps' in self.cfg.model.args:
@@ -174,7 +182,7 @@ class BDTrain(TrainExperiment):
             viz = (np.concatenate(viz,axis=1)*255).astype(np.uint8)
             
             im = Image.fromarray(viz)
-            im.save(os.path.join(example_path,"%d_%i.png"%(self.cur_epoch,i)))
+            im.save(os.path.join(example_path,"%d_%d.png"%(self.cur_epoch,i)))
 
             
 class BDTest(TestExperiment):

@@ -15,6 +15,8 @@ import logging
 
 import os
 
+torch.backends.cudnn.benchmark = True
+
 class Experiment:
     
     def __init__(self, cfg):
@@ -296,6 +298,16 @@ class TrainExperiment(Experiment):
                 train_summary.append(('histogram', 'grad_hist/'+p[0], g))
         self.summary(train_summary)
 
+    def track_grad_flow(self):
+        
+        n_p = self.model.module.named_parameters() if hasattr(self.model,'module') else self.model.named_parameters()
+
+        fig = pt_utils.plot_grad_flow_v2(n_p)
+
+        train_summary = [('figure', 'grad_flow/grad_flow', fig)]
+
+        self.summary(train_summary)
+        
     def track_weight_hist(self):
         if isinstance(self.cfg.track_weights.params, str):
             params = [self.cfg.track_weights.params]

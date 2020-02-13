@@ -1,0 +1,12 @@
+name: BSDS500_crops
+import_prepath: data.BSDS500_100
+import_class: BSDS500_AUG
+data_path: /media/data_cifs/image_datasets/hed_bsds/HED-BSDS/
+list_file: /media/data_cifs/image_datasets/hed_bsds/HED-BSDS/train_pair.lst
+resize: 160
+  # ToTensor: {}
+  # Normalize:
+  #   mean: [0.485, 0.456, 0.406]
+  #   std: [0.229, 0.224, 0.225]
+input: image
+target: label

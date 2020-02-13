@@ -25,7 +25,6 @@ def onehot_to_real(onehots):
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
-
 def plot_grad_flow_v2(named_parameters):
     '''Plots the gradients flowing through different layers in the net during training.
     Can be used for checking for possible gradient vanishing / exploding problems.

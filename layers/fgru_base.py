@@ -205,15 +205,12 @@ class fGRUCell(nn.Module):
             g1 = F.conv2d(h2_int, self.conv_g1_w)
         
         # g1_intermediate
-        g1_n = self.bn_g1(g1) if self.normalization_gate is not None else g1
+        g1_n = self.bn_g1(g1 + self.conv_g1_b) if self.normalization_gate is not None else g1
         
 
         # this changed from conv -> bn(in) -> bias -> sigmoid
         #                to conv -> sigmoid -> bn (beta is chronos)
-        h2_int_2 = h2_int * torch.sigmoid(g1_n + self.conv_g1_b)
-
-        if self.normalization_fgru:
-            h2 = self.bn_c1(h2)
+        h2_int_2 = h2_int * torch.sigmoid(g1_n)
 
         # c1 -> conv2d symmetric_weights, dilations
         if self.tied_kernels=='channel':
@@ -247,9 +244,9 @@ class fGRUCell(nn.Module):
         g2 = conv2d_same_padding(h1, self.conv_g2_w)
         # g2 = F.conv2d(h1, self.conv_g2_w)
 
-        g2_n = self.bn_g2(g2) if self.normalization_gate is not None else g2
+        g2_n = self.bn_g2(g2 + self.conv_g2_b) if self.normalization_gate is not None else g2
 
-        g2_s = torch.sigmoid(g2_n + self.conv_g2_b)
+        g2_s = torch.sigmoid(g2_n)
 
         if self.tied_kernels=='channel':
             c2 = tied_conv2d_same_padding(h1,self.conv_c2_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
@@ -401,7 +398,7 @@ class fGRUCell2(nn.Module):
         #     self.conv_c2_w.register_hook(lambda grad: (grad + torch.transpose(grad,1,0))*0.5)
 
         if gate_bias_init == 'chronos':
-            init_chronos = -np.log(np.random.uniform(1.0, max(float(timesteps- 1), 1.0), [hidden_size,1,1]))
+            init_chronos = np.log(np.random.uniform(1.0, max(float(timesteps- 1), 1.0), [hidden_size,1,1]))
 
             self.conv_g1_b.data = torch.FloatTensor(init_chronos)
             self.conv_g2_b.data = torch.FloatTensor(- init_chronos)
@@ -413,14 +410,14 @@ class fGRUCell2(nn.Module):
         self.mu = nn.Parameter(torch.empty((hidden_size,1,1)))
         
         self.omega = nn.Parameter(torch.empty((hidden_size,1,1)))
-        self.gamma = nn.Parameter(torch.empty((hidden_size,1,1)))
+        # self.gamma = nn.Parameter(torch.empty((hidden_size,1,1)))
         self.kappa = nn.Parameter(torch.empty((hidden_size,1,1)))
         
         init.constant_(self.alpha, 0.1)
         init.constant_(self.mu, 1.0)
 
         init.constant_(self.omega, 0.5)
-        init.constant_(self.gamma, 1.0)
+        # init.constant_(self.gamma, 1.0)
         init.constant_(self.kappa, 0.5)
 
     def forward(self, input_, prev_state2, timestep=0):
@@ -450,12 +447,12 @@ class fGRUCell2(nn.Module):
             g1 = F.conv2d(h2_int, self.conv_g1_w)
         
         # g1_intermediate
-        g1_n = self.bn_g1(g1) if self.normalization_gate is not None else g1
+        g1_n = self.bn_g1(g1 + self.conv_g1_b) if self.normalization_gate is not None else g1
         
 
         # this changed from conv -> bn(in) -> bias -> sigmoid
         #                to conv -> sigmoid -> bn (beta is chronos)
-        h2_int_2 = h2_int * torch.sigmoid(g1_n + self.conv_g1_b)
+        h2_int_2 = h2_int * torch.sigmoid(g1_n)
 
         # c1 -> conv2d symmetric_weights, dilations
         if self.tied_kernels=='channel':
@@ -488,9 +485,9 @@ class fGRUCell2(nn.Module):
 
         g2 = conv2d_same_padding(h1, self.conv_g2_w)
 
-        g2_n = self.bn_g2(g2) if self.normalization_gate is not None else g2
+        g2_n = self.bn_g2(g2 + self.conv_g2_b) if self.normalization_gate is not None else g2
 
-        g2_s = torch.sigmoid(g2_n + self.conv_g2_b)
+        g2_s = torch.sigmoid(g2_n)
 
         if self.tied_kernels=='channel':
             c2 = tied_conv2d_same_padding(h1,self.conv_c2_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
@@ -507,12 +504,12 @@ class fGRUCell2(nn.Module):
         ############## output integration
 
         # if self.multiplicative_excitation:
-        h2_hat = self.ff_nl( self.kappa*h1 + self.gamma*c2_n + self.omega*(h1 * c2_n) )
+        h2_hat = self.ff_nl( self.kappa*(h1 + c2_n) + self.omega*(h1 * c2_n) )
         # else:
         #     h2_hat = self.ff_nl(h1 + c2_n)
         # h2_hat = F.relu(h1 + c2_n)
 
-        h2 = g2_s * prev_state2 + (1 - g2_s) * h2_hat
+        h2 = (1 - g2_s) * prev_state2 + g2_s * h2_hat
         
         return h2, h1
 

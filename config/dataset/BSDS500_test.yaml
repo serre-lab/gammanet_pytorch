@@ -3,8 +3,6 @@ import_prepath: data.BSDS500_100
 import_class: BSDS500
 images_path: /media/data_cifs/pytorch_projects/datasets/BSDS500_crops/data/images/test_nocrop
 labels_path: /media/data_cifs/pytorch_projects/datasets/BSDS500_crops/data/groundTruth/test_nocrop
-transform: 
-  Resize:
-    size: 320
+resize: null
 input: image
 target: label

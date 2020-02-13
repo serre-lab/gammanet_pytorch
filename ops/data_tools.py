@@ -12,9 +12,9 @@ def process_transforms(cfg):
         assert hasattr(tv_transforms, transform), "transform operation not found" #or hasattr(transforms, transform)
 
         if hasattr(tv_transforms, transform):
-            return getattr(tv_transforms, transform)(**kwargs)
+            return getattr(tv_transforms, transform)(**dict(kwargs))
         else:
-            return getattr(tv_transforms, transform)(**kwargs)
+            return getattr(tv_transforms, transform)(**dict(kwargs))
     if len(cfg)==0:
         return tv_transforms.ToTensor()
     else:
