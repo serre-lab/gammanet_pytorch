@@ -17,6 +17,7 @@ import numpy as np
 from torch.nn import init
 
 from layers.fgru_base import fGRUCell2 as fGRUCell
+from layers.fgru_base import fGRUCell2_td as fGRUCell_td
 
 from utils.pt_utils import Conv2dSamePadding
 from utils import pt_utils
@@ -149,7 +150,7 @@ class BaseGN(nn.Module):
             
             feats = base_filters[base_layers.index(pos)]
 
-            td_unit = fGRUCell(input_size = feats, 
+            td_unit = fGRUCell_td(input_size = feats, 
                             hidden_size = feats, 
                             kernel_size = k_size,
                             **self.fgru_params)

@@ -15,6 +15,10 @@ import logging
 
 import os
 
+import matplotlib as mpl
+# mpl.use('Agg')
+mpl.rcParams.update({'figure.autolayout': True})
+
 torch.backends.cudnn.benchmark = True
 
 class Experiment:

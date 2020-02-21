@@ -20,8 +20,7 @@ from utils.py_utils import AverageMeter
 
 from experiments.base import TrainExperiment, TestExperiment
 
-import matplotlib
-matplotlib.use('Agg')
+
 
 class BDTrain(TrainExperiment):
 

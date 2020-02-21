@@ -513,6 +513,102 @@ class fGRUCell2(nn.Module):
         
         return h2, h1
 
+class fGRUCell2_td(fGRUCell2):
+    def forward(self, input_, prev_state2, timestep=0):
+        #ff_nl = pt_utils.get_nl(self.ff_nl)
+        
+        if timestep == 0 and prev_state2 is None:
+            
+            if self.hidden_init =='identity':
+                prev_state2 = input_
+            elif self.hidden_init =='zero':
+                prev_state2 = torch.empty_like(input_)
+                init.zeros_(prev_state2)
+            else:
+                prev_state2 = torch.empty_like(input_)
+                init.xavier_normal_(prev_state2)
+
+        i = timestep
+        
+        h2_int = prev_state2
+        
+        ############## circuit input
+        
+        if hasattr(self,'attention'):
+            g1 = self.attention(h2_int)
+        else:
+            # g1 = conv2d_same_padding(h2_int, self.conv_g1_w)
+            g1 = F.conv2d(h2_int, self.conv_g1_w)
+        
+        # g1_intermediate
+        g1_n = self.bn_g1(g1 + self.conv_g1_b) if self.normalization_gate is not None else g1
+        
+
+        # this changed from conv -> bn(in) -> bias -> sigmoid
+        #                to conv -> sigmoid -> bn (beta is chronos)
+        h2_int_2 = h2_int * torch.sigmoid(g1_n)
+
+        # c1 -> conv2d symmetric_weights, dilations
+        if self.tied_kernels=='channel':
+            c1 = tied_conv2d_same_padding(h2_int_2,self.conv_c1_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
+        elif self.tied_kernels=='spatial':
+            c1 = space_tied_conv2d_same_padding(h2_int_2,self.conv_c1_w, padding_mode='reflect')
+        elif self.tied_kernels=='depth':
+            c1 = conv2d_same_padding(h2_int_2,self.conv_c1_w, groups=self.hidden_size, padding_mode='reflect')
+        else:
+            c1 = conv2d_same_padding(h2_int_2,self.conv_c1_w, padding_mode='reflect')
+
+        c1_n = self.bn_c1(c1) if self.normalization_fgru is not None else c1
+
+        ############## input integration
+        
+        # alpha, mu
+        # if self.force_alpha_divisive:
+        #     alpha = torch.sigmoid(self.alpha)
+        # else:
+        #     alpha = self.alpha
+        # inh = (self.alpha * prev_state2 + self.mu) * c1_n
+
+        # if self.force_non_negativity:
+        #     h1 = self.ff_nl(self.ff_nl(input_) - self.ff_nl(inh))
+        # else:
+        
+        h1 = self.ff_nl(input_ - self.ff_nl((self.alpha * prev_state2 + self.mu) * c1_n))
+        
+        ############## circuit output
+
+        g2 = conv2d_same_padding(h1, self.conv_g2_w)
+
+        g2_n = self.bn_g2(g2 + self.conv_g2_b) if self.normalization_gate is not None else g2
+
+        g2_s = torch.sigmoid(g2_n)
+
+        if self.tied_kernels=='channel':
+            c2 = tied_conv2d_same_padding(h1,self.conv_c2_w,pool_size=(self.kernel_size,self.kernel_size), padding_mode='reflect')
+        elif self.tied_kernels=='spatial':
+            c2 = space_tied_conv2d_same_padding(h1,self.conv_c2_w, padding_mode='reflect')
+        elif self.tied_kernels=='depth':
+            c2 = conv2d_same_padding(h1,self.conv_c2_w, groups=self.hidden_size, padding_mode='reflect')
+        else:
+            c2 = conv2d_same_padding(h1, self.conv_c2_w, padding_mode='reflect')
+            # c2 = F.conv2d(h1, self.conv_c2_w, padding=(self.kernel_size//2,self.kernel_size//2))
+
+        c2_n = self.bn_c2(c2) if self.normalization_fgru is not None else c2
+        
+        ############## output integration
+
+        # if self.multiplicative_excitation:
+        h2_hat = self.ff_nl( self.kappa*(h1 + c2_n) + self.omega*(h1 * c2_n) )
+        # else:
+        #     h2_hat = self.ff_nl(h1 + c2_n)
+        # h2_hat = F.relu(h1 + c2_n)
+
+        h2 = (1 - g2_s) * input_ + g2_s * h2_hat
+        
+        return h2, h1
+
+
+
 class SE_Attention(nn.Module):
     """ if layers > 1  downsample -> upsample """
     

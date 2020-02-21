@@ -12,6 +12,8 @@ python run.py   config/exp/contour_detection \
                 trainset=-dataset.BSDS500_train_aug \
                 valset=-dataset.BSDS500_val \
                 > $EXP_NAME.log 2>&1 &
+
+                # track_grads.grad_flow.freq=1 \
                 # trainset.transform.Resize.size=250 \
                 # valset.transform.Resize.size=250 \
                 

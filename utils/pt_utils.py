@@ -2,11 +2,16 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+import matplotlib as mpl
+mpl.use('Agg')
+import pylab as plt
+print(plt.get_backend())
 # plt.ion()
 # plt.show()
+
 
 def real_number_batch_to_indexes(real_numbers, bins):
     """Converts a batch of real numbers to a batch of one hot vectors for the bins the real numbers fall in."""
