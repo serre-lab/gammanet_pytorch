@@ -92,7 +92,8 @@ class BaseGN(nn.Module):
             'ff_non_linearity'          : ff_non_linearity,
             'force_alpha_divisive'      : force_alpha_divisive,
             'force_non_negativity'      : force_non_negativity,
-            'multiplicative_excitation' : multiplicative_excitation
+            'multiplicative_excitation' : multiplicative_excitation,
+            'timesteps'                 : timesteps
         }
         
         self.base_ff = model_tools.get_model(base_ff)

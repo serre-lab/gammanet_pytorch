@@ -43,7 +43,8 @@ class fGRUCell(nn.Module):
                 force_alpha_divisive=True,
                 force_non_negativity=True,
                 multiplicative_excitation=True,
-                gate_bias_init='chronos' #'ones'
+                gate_bias_init='chronos', #'ones'
+                timesteps=8
                 ):
         super().__init__()
         
