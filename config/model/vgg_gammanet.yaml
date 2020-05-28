@@ -2,7 +2,7 @@ name: vgg_gammanet
 import_prepath: models.vgg_gammanet
 import_class: VGG_16_GN
 args:
-  weights_path: /media/data_cifs/aimen/CC_experiments/model_weights/vgg_16.pth.tar
+  weights_path: ./model_weights/vgg_16.pth.tar
   load_weights: True 
   gn_params:
     - ['conv2_2', 3]
